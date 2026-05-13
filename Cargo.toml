@@ -1,0 +1,22 @@
+[package]
+name = "swifterpm"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0.98"
+clap = { version = "4.5.38", features = ["derive"] }
+dirs = "6.0.0"
+flate2 = "1.1.1"
+hex = "0.4.3"
+pubgrub = "0.4.0"
+rayon = "1.10.0"
+reqwest = { version = "0.12.15", features = ["blocking", "json", "rustls-tls"], default-features = false }
+semver = { version = "1.0.26", features = ["serde"] }
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
+sha2 = "0.10.9"
+tar = "0.4.44"
+tempfile = "3.20.0"
+url = "2.5.4"
