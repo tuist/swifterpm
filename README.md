@@ -1,14 +1,28 @@
-# swifterpm
+# swifterpm ⚡
 
-`swifterpm` is a Rust prototype for faster Swift package source restoration.
+`swifterpm` is a faster Swift package restoration tool built for workflows where dependency resolution happens often, across many clean worktrees, and under heavy concurrency.
 
-It is not a drop-in SwiftPM replacement yet. The current implementation focuses on the two expensive source-control operations observed in SwiftPM:
+## Motivation 🤖
 
-- resolution metadata for direct source-control dependencies is fetched through the GitHub API, with `git ls-remote` as a fallback
-- restored package sources live once in a global cache, then `.build/checkouts` entries are symlinked to that cache
-- semantic version solving is being built around `pubgrub`, with a SwiftPM-specific provider responsible for fetching package versions and manifests
+Concurrent package installation is becoming the default in a world of coding agents. A single developer may now have several agents resolving dependencies in parallel, often across different worktrees of the same project. In that world, slow resolution and duplicated package checkouts become very expensive.
 
-## Commands
+Other package managers have already iterated on this problem. Tools like pnpm and aube show that a global cache plus cheap project-local links can make installs both faster and much more disk efficient. Tuist users reported SwiftPM resolution and checkout restoration as a bottleneck, so we felt compelled to solve it for them.
+
+Tuist generated projects gave us a clean contract to replace: package resolution is decoupled from project integration, so `tuist install` can use a faster resolver/restorer before Tuist generates or updates the Xcode project.
+
+> [!IMPORTANT]
+> `swifterpm` cannot transparently speed up standard Xcode projects. Xcode integrates SwiftPM internally, and that integration does not expose a supported hook where we can replace the resolver or checkout restorer. For now, this improvement is aimed at Tuist workflows and other flows that can call `swifterpm` before project integration.
+
+## How it works
+
+- **Lockfile fast path**: When `Package.resolved` is available, `swifterpm` can use `--force-resolved-versions` to skip dependency solving and restore exactly the pinned revisions.
+- **GitHub archives first**: For GitHub dependencies, it downloads source tarballs for pinned revisions instead of cloning full repositories. A shallow Git fetch is kept as a fallback.
+- **Global source cache**: Archives and extracted source trees are stored once in a shared cache, keyed by package identity, version, and revision.
+- **Project-local symlinks**: `.build/checkouts` entries point back to the global cache instead of copying every dependency into every worktree.
+- **Concurrent-safe writes**: Package restoration runs in parallel, while cache writes use file locks, temporary files, and atomic moves so multiple installs can share the same cache safely.
+- **Tuist package-info cache**: `swifterpm` can also persist SwiftPM manifest JSON under `.build/swifterpm/package-info`, allowing Tuist to avoid re-running parts of manifest loading later.
+
+## Install and run
 
 Install the latest release with mise:
 
@@ -16,101 +30,29 @@ Install the latest release with mise:
 mise use -g github:tuist/swifterpm@latest
 ```
 
-Or run it without changing your mise config:
+Resolve and restore a package:
 
 ```sh
-mise x github:tuist/swifterpm@latest -- swifterpm --version
+swifterpm --package-path . resolve
 ```
+
+Use the fastest path when `Package.resolved` already exists:
 
 ```sh
-cargo build
-target/debug/swifterpm --package-path . resolve
-target/debug/swifterpm --package-path . --scratch-path /tmp/package-build resolve
-target/debug/swifterpm --package-path . --build-path /tmp/package-build update
-target/debug/swifterpm restore --package-dir .
+swifterpm --package-path . --force-resolved-versions resolve
 ```
 
-`resolve` and `update` accept the SwiftPM-shaped flags that matter for `tuist install`,
-including `--package-path`, `--cache-path`, `--scratch-path`, `--build-path`,
-`--skip-update`, `--force-resolved-versions`,
-`--disable-automatic-resolution`, `--only-use-versions-from-resolved-file`,
-and Tuist's current `--replace-scm-with-registry` passthrough. Registry flags are
-accepted for command compatibility, but registry resolution is still a separate
-piece of work.
-
-By default, `resolve` and `update` write `Package.resolved` and restore checkouts.
-Use `--print-only` for the old inspect-only behavior.
-
-Resolution also writes SwiftPM manifest JSON into:
-
-```text
-.build/swifterpm/package-info/index.json
-```
-
-The index points at raw `swift package dump-package` JSON files for the root package and restored source-control packages. Tuist can use these files to decode `PackageInfo` without invoking SwiftPM again during graph loading. Pass `--disable-package-info-cache` to skip this, or `--package-info-cache-path` to choose a different location.
-
-The default cache root is:
-
-```text
-~/Library/Caches/swifterpm
-```
-
-## Tuist fixture
-
-This repository includes a copy of Tuist's `Package.swift` plus its Swift registry configuration. The manifest has:
-
-- 1 direct source-control dependency
-- 45 registry dependencies
-- 2 local file-system dependencies
-
-The two local dependency directories are expected as ignored local symlinks back to `../tuist`:
+Or run without changing your mise config:
 
 ```sh
-mkdir -p server/native xcode_processor/native
-ln -s ../../../tuist/server/native/xcactivitylog_nif server/native/xcactivitylog_nif
-ln -s ../../../tuist/xcode_processor/native/xcresult_nif xcode_processor/native/xcresult_nif
+mise x github:tuist/swifterpm@latest -- swifterpm --package-path . --force-resolved-versions resolve
 ```
 
-`swifterpm --package-path . resolve` resolves and restores the direct source-control dependency from this manifest. `swifterpm restore` also handles mixed `Package.resolved` files by restoring source-control pins and skipping registry pins.
+Useful SwiftPM-shaped flags are supported, including `--package-path`, `--cache-path`, `--scratch-path`, `--build-path`, `--skip-update`, `--force-resolved-versions`, `--disable-automatic-resolution`, and `--only-use-versions-from-resolved-file`.
 
-## Current boundaries
+## Benchmarks 📊
 
-Registry package resolution is detected but not reimplemented yet. Tuist uses a registry at `https://registry.tuist.dev/api/registry/swift`, so full Tuist graph parity requires implementing the Swift Package Registry protocol, authentication, registry archive caching, and transitive manifest resolution.
-
-The resolver core should be split in two layers:
-
-- PubGrub solver: pure version selection over package identities, semantic versions, and ranges.
-- SwiftPM provider: lists available versions from GitHub tags/releases or Swift registries, fetches the manifest for a selected `(package, version)`, converts SwiftPM requirements into PubGrub ranges, and reports unavailable packages or versions.
-
-Revision and branch dependencies sit outside PubGrub because they are not semantic version sets. They should remain direct pins or use the Git fallback path.
-
-For source-control packages, the cache stores extracted source archives rather than full Git mirrors. That is intentionally smaller and faster, but it means workflows that require a mutable Git checkout need a fallback mode.
-
-## Cache Model
-
-The cache is split like modern package managers such as aube and pnpm:
-
-- `archives/`: compressed GitHub tarballs keyed by URL and revision
-- `sources/`: immutable extracted source trees keyed by package identity, version, and revision
-- `metadata/remotes/`: available version metadata keyed by repository URL, with a short freshness window
-- project `.build/checkouts`: symlinks back to `sources/`
-
-Aube also has a global virtual store for already-materialized package directory trees. `swifterpm`'s equivalent is simpler because Swift package checkouts do not need Node's nested module graph: the extracted source tree is the materialized unit, and project checkouts are symlinks to it.
-
-Restore materializes source-control pins in parallel. That keeps cold restores from waiting on one archive download or extraction at a time and makes warm restores mostly filesystem link work.
-
-Cache writes are guarded with file locks under `locks/`, and archive, source, and metadata writes use temporary files plus atomic moves. Multiple projects can resolve or restore against the same global cache concurrently without reading partial downloads or replacing the same cached source tree at the same time.
-
-## Release Signing
-
-macOS release archives are signed and notarized in GitHub Actions when `SWIFTERPM_SIGN_MACOS=true`. The release workflow reads the Developer ID certificate and app-specific password from 1Password using `OP_SERVICE_ACCOUNT_TOKEN`, matching Tuist's CLI release flow. Non-macOS targets are packaged without signing.
-
-## Benchmarks
-
-The real-codebase benchmark script is [mise/tasks/benchmark/resolution.sh](mise/tasks/benchmark/resolution.sh). It clones each repository into a temporary directory, removes that directory on exit, and benchmarks:
-
-- cold resolution: package scratch directories and swifterpm's cache are removed before each run
-- worktree-warm resolution: package scratch directories are removed before each run, while already-primed global caches are kept to model switching to another clean worktree
+The benchmark script is [mise/tasks/benchmark/resolution.sh](mise/tasks/benchmark/resolution.sh). It clones each repository into a temporary directory, deletes it on completion, and compares SwiftPM against `swifterpm` for cold resolution and worktree-warm resolution.
 
 Run it with:
 
@@ -118,61 +60,13 @@ Run it with:
 mise run benchmark:resolution -- --runs 3
 ```
 
-Latest single-run sample, generated on macOS 26.4.1 with Apple Swift 6.3.2 using:
+Latest single-run sample, generated on macOS 26.4.1 with Apple Swift 6.3.2:
 
-```sh
-mise run benchmark:resolution -- --runs 1 --output-dir /tmp/swifterpm-benchmark-results
-```
+| Codebase | Scenario | SwiftPM | swifterpm | Time reduction | Speedup |
+|:---|:---|---:|---:|---:|---:|
+| Pocket Casts iOS `Modules/Package.swift` | Cold | 225.498 s | 9.392 s | 95.83% | 24.01x |
+| Pocket Casts iOS `Modules/Package.swift` | Worktree-warm | 54.705 s | 0.014 s | 99.97% | 3989.37x |
+| Firefox iOS root `Package.swift` | Cold | 37.414 s | 1.203 s | 96.78% | 31.10x |
+| Firefox iOS root `Package.swift` | Worktree-warm | 4.439 s | 0.008 s | 99.82% | 522.78x |
 
-Pocket Casts iOS `Modules/Package.swift`:
-
-| Scenario | SwiftPM | swifterpm | Time reduction | Speedup |
-|:---|---:|---:|---:|---:|
-| Cold | 225.498 s | 9.392 s | 95.83% | 24.01x |
-| Worktree-warm | 54.705 s | 0.014 s | 99.97% | 3989.37x |
-
-Firefox iOS root `Package.swift`:
-
-| Scenario | SwiftPM | swifterpm | Time reduction | Speedup |
-|:---|---:|---:|---:|---:|
-| Cold | 37.414 s | 1.203 s | 96.78% | 31.10x |
-| Worktree-warm | 4.439 s | 0.008 s | 99.82% | 522.78x |
-
-GitHubized Tuist fixture:
-
-- 83 pins
-- 83 `remoteSourceControl` pins
-- 0 registry pins
-
-Cold clean `.build`, one run:
-
-```text
-swift package resolve                  25.476 s
-swifterpm restore, empty cache          7.777 s
-```
-
-Warm cache, repeated clean `.build` restore:
-
-```text
-swifterpm restore                      28.8 ms +/- 0.9 ms
-```
-
-Warm existing SwiftPM `.build` versus existing swifterpm checkout symlinks:
-
-```text
-swift package resolve                   1.048 s +/- 0.006 s
-swifterpm restore                      29.6 ms +/- 2.1 ms
-```
-
-Disk after cold restore:
-
-```text
-SwiftPM .build                         1.9 GB
-  repositories                          848 MB
-  checkouts                             901 MB
-
-swifterpm project .build                 44 KB
-swifterpm global cache                  659 MB
-  sources                               525 MB
-  archives                              134 MB
-```
+Cold resolution removes package-local scratch directories and `swifterpm`'s cache before each run. Worktree-warm resolution removes package-local scratch directories before each run while keeping already-primed global caches, which models switching to another clean worktree.
