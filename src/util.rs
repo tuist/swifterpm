@@ -1,6 +1,12 @@
-use std::{fs, io, path::Path, process::Command};
+use std::{
+    fs::{self, OpenOptions},
+    io,
+    path::Path,
+    process::Command,
+};
 
 use anyhow::{Result, bail};
+use fs2::FileExt;
 use sha2::{Digest, Sha256};
 
 pub(crate) fn command_output(command: &mut Command) -> Result<String> {
@@ -59,5 +65,40 @@ pub(crate) fn flatten_single_directory(path: &Path) -> Result<()> {
     fs::rename(&nested, &temp)?;
     fs::remove_dir_all(path)?;
     fs::rename(temp, path)?;
+    Ok(())
+}
+
+pub(crate) struct PathLock {
+    file: fs::File,
+}
+
+impl Drop for PathLock {
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
+}
+
+pub(crate) fn lock_path(path: &Path) -> Result<PathLock> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)?;
+    file.lock_exclusive()?;
+    Ok(PathLock { file })
+}
+
+pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("{} has no parent", path.display()))?;
+    fs::create_dir_all(parent)?;
+    let mut temp = tempfile::NamedTempFile::new_in(parent)?;
+    io::Write::write_all(&mut temp, bytes)?;
+    temp.persist(path)?;
     Ok(())
 }

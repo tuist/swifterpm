@@ -72,7 +72,7 @@ jobs:
         with:
           version: ${{ env.MISE_VERSION }}
           cache: true
-          install_args: rust
+          install_args: rust 1password-cli jq
 
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
@@ -85,6 +85,9 @@ jobs:
         run: rustup target add ${{ matrix.target }}
 
       - name: Package release archive
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          SWIFTERPM_SIGN_MACOS: ${{ contains(matrix.target, 'apple-darwin') }}
         run: mise run release:package --target "${{ matrix.target }}" --version "${{ needs.detect.outputs.next-version }}"
 
       - name: Upload release asset

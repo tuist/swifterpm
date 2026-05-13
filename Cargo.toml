@@ -9,6 +9,7 @@ anyhow = "1.0.98"
 clap = { version = "4.5.38", features = ["derive"] }
 dirs = "6.0.0"
 flate2 = "1.1.1"
+fs2 = "0.4.3"
 hex = "0.4.3"
 pubgrub = "0.4.0"
 rayon = "1.10.0"

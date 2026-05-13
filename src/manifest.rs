@@ -19,9 +19,19 @@ pub(crate) enum Requirement {
     Branch(String),
 }
 
-pub(crate) fn dump_package(package_dir: &Path) -> Result<Value> {
-    let output = Command::new("swift")
-        .args(["package", "dump-package"])
+pub(crate) fn dump_package(package_dir: &Path, disable_sandbox: bool) -> Result<Value> {
+    let output = dump_package_json(package_dir, disable_sandbox)?;
+    serde_json::from_slice(&output).context("failed to parse dump-package JSON")
+}
+
+pub(crate) fn dump_package_json(package_dir: &Path, disable_sandbox: bool) -> Result<Vec<u8>> {
+    let mut command = Command::new("swift");
+    command.arg("package");
+    if disable_sandbox {
+        command.arg("--disable-sandbox");
+    }
+    let output = command
+        .arg("dump-package")
         .current_dir(package_dir)
         .output()
         .context("failed to run swift package dump-package")?;
@@ -31,7 +41,7 @@ pub(crate) fn dump_package(package_dir: &Path) -> Result<Value> {
             String::from_utf8_lossy(&output.stderr)
         );
     }
-    serde_json::from_slice(&output.stdout).context("failed to parse dump-package JSON")
+    Ok(output.stdout)
 }
 
 pub(crate) fn parse_manifest_dependencies(manifest: &Value) -> Result<Vec<ManifestDependency>> {

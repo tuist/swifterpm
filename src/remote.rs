@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     cache::Cache,
     github::{GitHubRepo, github_token},
-    util::command_output,
+    util::{atomic_write, command_output},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -23,6 +23,11 @@ struct RemoteVersionsCache {
 }
 
 pub(crate) fn remote_versions(location: &str, cache: &Cache) -> Result<Vec<RemoteVersion>> {
+    if let Some(versions) = read_cached_remote_versions(cache, location)? {
+        return Ok(versions);
+    }
+
+    let _lock = cache.lock("remote-versions", location)?;
     if let Some(versions) = read_cached_remote_versions(cache, location)? {
         return Ok(versions);
     }
@@ -73,16 +78,11 @@ fn write_cached_remote_versions(
     versions: &[RemoteVersion],
 ) -> Result<()> {
     let path = cache.remote_versions_path(location);
-    let temp = path.with_extension("json.tmp");
-    let file = fs::File::create(&temp)?;
-    serde_json::to_writer_pretty(
-        file,
-        &RemoteVersionsCache {
-            location: location.to_string(),
-            versions: versions.to_vec(),
-        },
-    )?;
-    fs::rename(temp, path)?;
+    let bytes = serde_json::to_vec_pretty(&RemoteVersionsCache {
+        location: location.to_string(),
+        versions: versions.to_vec(),
+    })?;
+    atomic_write(&path, &bytes)?;
     Ok(())
 }
 

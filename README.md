@@ -29,6 +29,14 @@ piece of work.
 By default, `resolve` and `update` write `Package.resolved` and restore checkouts.
 Use `--print-only` for the old inspect-only behavior.
 
+Resolution also writes SwiftPM manifest JSON into:
+
+```text
+.build/swifterpm/package-info/index.json
+```
+
+The index points at raw `swift package dump-package` JSON files for the root package and restored source-control packages. Tuist can use these files to decode `PackageInfo` without invoking SwiftPM again during graph loading. Pass `--disable-package-info-cache` to skip this, or `--package-info-cache-path` to choose a different location.
+
 The default cache root is:
 
 ```text
@@ -78,6 +86,12 @@ The cache is split like modern package managers such as aube and pnpm:
 Aube also has a global virtual store for already-materialized package directory trees. `swifterpm`'s equivalent is simpler because Swift package checkouts do not need Node's nested module graph: the extracted source tree is the materialized unit, and project checkouts are symlinks to it.
 
 Restore materializes source-control pins in parallel. That keeps cold restores from waiting on one archive download or extraction at a time and makes warm restores mostly filesystem link work.
+
+Cache writes are guarded with file locks under `locks/`, and archive, source, and metadata writes use temporary files plus atomic moves. Multiple projects can resolve or restore against the same global cache concurrently without reading partial downloads or replacing the same cached source tree at the same time.
+
+## Release Signing
+
+macOS release archives are signed and notarized in GitHub Actions when `SWIFTERPM_SIGN_MACOS=true`. The release workflow reads the Developer ID certificate and app-specific password from 1Password using `OP_SERVICE_ACCOUNT_TOKEN`, matching Tuist's CLI release flow. Non-macOS targets are packaged without signing.
 
 ## Benchmarks
 

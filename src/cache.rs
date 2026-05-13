@@ -4,7 +4,7 @@ use anyhow::{Result, anyhow};
 
 use crate::{
     resolved::ResolvedPin,
-    util::{short_revision, stable_hash},
+    util::{PathLock, lock_path, short_revision, stable_hash},
 };
 
 #[derive(Debug, Clone)]
@@ -23,6 +23,7 @@ impl Cache {
         fs::create_dir_all(root.join("sources"))?;
         fs::create_dir_all(root.join("archives"))?;
         fs::create_dir_all(root.join("metadata/remotes"))?;
+        fs::create_dir_all(root.join("locks"))?;
         fs::create_dir_all(root.join("virtual/checkouts"))?;
         Ok(Self { root })
     }
@@ -53,5 +54,15 @@ impl Cache {
         self.root
             .join("metadata/remotes")
             .join(format!("{}.json", stable_hash(location)))
+    }
+
+    pub(crate) fn lock(&self, namespace: &str, key: &str) -> Result<PathLock> {
+        lock_path(
+            &self
+                .root
+                .join("locks")
+                .join(namespace)
+                .join(format!("{}.lock", stable_hash(key))),
+        )
     }
 }

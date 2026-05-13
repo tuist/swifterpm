@@ -44,5 +44,64 @@ stage_dir="$(mktemp -d)"
 trap 'rm -rf "${stage_dir}"' EXIT
 cp "target/${target}/release/${bin_name}" "${stage_dir}/${bin_name}"
 
+if [[ "${target}" == *-apple-darwin && "${SWIFTERPM_SIGN_MACOS:-}" == "true" ]]; then
+  keychain_path="${stage_dir}/signing.keychain"
+  keychain_password="$(uuidgen)"
+  team_id="${SWIFTERPM_APPLE_TEAM_ID:-U6LC622NKF}"
+  certificate_name="${SWIFTERPM_CERTIFICATE_NAME:-Developer ID Application: Tuist GmbH (U6LC622NKF)}"
+  certificate_item="${SWIFTERPM_CERTIFICATE_ITEM:-op://tuist/Developer ID Application Certificate}"
+  app_password_item="${SWIFTERPM_APP_PASSWORD_ITEM:-op://tuist/App Specific Password}"
+
+  if [[ -z "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]]; then
+    echo "OP_SERVICE_ACCOUNT_TOKEN is required to sign and notarize macOS releases" >&2
+    exit 1
+  fi
+
+  for tool in op security codesign xcrun ditto jq; do
+    if ! command -v "${tool}" >/dev/null 2>&1; then
+      echo "${tool} is required to sign and notarize macOS releases" >&2
+      exit 1
+    fi
+  done
+
+  echo "Setting up temporary keychain for macOS signing"
+  security create-keychain -p "${keychain_password}" "${keychain_path}"
+  security set-keychain-settings -lut 21600 "${keychain_path}"
+  security default-keychain -s "${keychain_path}"
+  security unlock-keychain -p "${keychain_password}" "${keychain_path}"
+  security list-keychains -d user -s "${keychain_path}"
+
+  op read "${certificate_item}/certificate.p12" --out-file "${stage_dir}/certificate.p12"
+  certificate_password="$(op read "${certificate_item}/password")"
+  security import "${stage_dir}/certificate.p12" \
+    -k "${keychain_path}" \
+    -P "${certificate_password}" \
+    -T /usr/bin/codesign \
+    -T /usr/bin/security
+  security set-key-partition-list \
+    -S apple-tool:,apple:,codesign: \
+    -s \
+    -k "${keychain_password}" \
+    "${keychain_path}" >/dev/null
+
+  echo "Signing ${bin_name}"
+  codesign \
+    --force \
+    --timestamp \
+    --options runtime \
+    --sign "${certificate_name}" \
+    "${stage_dir}/${bin_name}"
+
+  echo "Submitting ${bin_name} for notarization"
+  notarization_zip="${stage_dir}/notarization.zip"
+  ditto -c -k --keepParent "${stage_dir}/${bin_name}" "${notarization_zip}"
+  xcrun notarytool submit "${notarization_zip}" \
+    --wait \
+    --apple-id "$(op read "${app_password_item}/username")" \
+    --team-id "${team_id}" \
+    --password "$(op read "${app_password_item}/password")" \
+    --output-format json | jq -e '.status == "Accepted"' >/dev/null
+fi
+
 asset="swifterpm-${version}-${target}.tar.gz"
 tar -C "${stage_dir}" -czf "dist/${asset}" "${bin_name}"

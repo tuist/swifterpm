@@ -11,8 +11,12 @@ use crate::{
     resolved::{ResolvedPin, ResolvedPins, ResolvedState},
 };
 
-pub(crate) fn resolve_package(package_dir: &Path, cache: &Cache) -> Result<ResolvedPins> {
-    let manifest = dump_package(package_dir)?;
+pub(crate) fn resolve_package(
+    package_dir: &Path,
+    cache: &Cache,
+    disable_sandbox: bool,
+) -> Result<ResolvedPins> {
+    let manifest = dump_package(package_dir, disable_sandbox)?;
     let dependencies = parse_manifest_dependencies(&manifest)?;
     if dependencies.is_empty() {
         bail!("no sourceControl dependencies found in Package.swift");

@@ -3,6 +3,7 @@ pub mod cli;
 mod cache;
 mod github;
 mod manifest;
+mod package_info_cache;
 mod remote;
 mod resolve;
 mod resolved;

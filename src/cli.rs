@@ -5,6 +5,7 @@ use clap::{Parser, Subcommand};
 
 use crate::{
     cache::Cache,
+    package_info_cache::write_package_info_cache,
     resolve::resolve_package,
     resolved::{print_resolution, read_resolved_file, write_resolved_file},
     restore::restore_package,
@@ -73,6 +74,12 @@ struct Cli {
     /// Suppress resolution and restore progress output.
     #[arg(short, long, global = true)]
     quiet: bool,
+    /// Do not cache SwiftPM dump-package JSON for Tuist's later graph loading.
+    #[arg(long, global = true)]
+    disable_package_info_cache: bool,
+    /// Directory where package manifest JSON should be cached. Defaults to <scratch>/swifterpm/package-info.
+    #[arg(long, global = true, value_name = "package-info-cache-path")]
+    package_info_cache_path: Option<PathBuf>,
     #[command(subcommand)]
     command: Commands,
 }
@@ -190,7 +197,8 @@ pub fn run() -> Result<()> {
             let package = canonical_package_dir(command_package_dir(&cli, package_dir))?;
             let scratch = command_scratch_dir(&cli, &package, scratch_dir.as_ref());
             let resolved = read_resolved_file(&package)?;
-            restore_package(&scratch, &cache, &resolved, cli.quiet)
+            restore_package(&scratch, &cache, &resolved, cli.quiet)?;
+            maybe_write_package_info_cache(&cli, &package, &scratch, &resolved)
         }
     }
 }
@@ -214,7 +222,7 @@ fn run_resolution_command(
         read_resolved_file(&package)
             .with_context(|| format!("failed to read Package.resolved for {}", package.display()))?
     } else {
-        let resolved = resolve_package(&package, &cache)?;
+        let resolved = resolve_package(&package, &cache, cli.disable_sandbox)?;
         if should_write(write, print_only) {
             write_resolved_file(&package, &resolved)?;
         }
@@ -226,8 +234,28 @@ fn run_resolution_command(
     }
     if should_restore(restore, print_only) {
         restore_package(&scratch, &cache, &resolved, cli.quiet)?;
+        maybe_write_package_info_cache(cli, &package, &scratch, &resolved)?;
     }
     Ok(())
+}
+
+fn maybe_write_package_info_cache(
+    cli: &Cli,
+    package: &std::path::Path,
+    scratch: &std::path::Path,
+    resolved: &crate::resolved::ResolvedPins,
+) -> Result<()> {
+    if cli.disable_package_info_cache {
+        return Ok(());
+    }
+    write_package_info_cache(
+        package,
+        scratch,
+        resolved,
+        cli.package_info_cache_path.as_deref(),
+        cli.disable_sandbox,
+        cli.quiet,
+    )
 }
 
 fn ensure_whole_package_resolution(
@@ -297,6 +325,7 @@ mod tests {
             "/tmp/tuist-build",
             "--replace-scm-with-registry",
             "--force-resolved-versions",
+            "--disable-package-info-cache",
             "resolve",
         ])
         .unwrap();

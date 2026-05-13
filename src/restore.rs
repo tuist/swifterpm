@@ -14,7 +14,7 @@ use crate::{
     cache::Cache,
     github::{GitHubRepo, github_token},
     resolved::{ResolvedPin, ResolvedPins, checkout_directory_name, is_source_control_kind},
-    util::{flatten_single_directory, replace_with_symlink, run},
+    util::{atomic_write, flatten_single_directory, lock_path, replace_with_symlink, run},
 };
 
 pub(crate) fn restore_package(
@@ -23,6 +23,7 @@ pub(crate) fn restore_package(
     resolved: &ResolvedPins,
     quiet: bool,
 ) -> Result<()> {
+    let _scratch_lock = lock_path(&scratch_dir.join(".swifterpm.lock"))?;
     let checkouts = scratch_dir.join("checkouts");
     fs::create_dir_all(&checkouts)?;
 
@@ -106,9 +107,9 @@ fn write_workspace_state(scratch_dir: &Path, resolved: &ResolvedPins) -> Result<
     });
     fs::create_dir_all(scratch_dir)?;
     let path = scratch_dir.join("workspace-state.json");
-    let mut file = fs::File::create(&path)?;
-    serde_json::to_writer_pretty(&mut file, &state)?;
-    writeln!(file)?;
+    let mut bytes = serde_json::to_vec_pretty(&state)?;
+    writeln!(bytes)?;
+    atomic_write(&path, &bytes)?;
     Ok(())
 }
 
@@ -116,6 +117,13 @@ fn ensure_source(cache: &Cache, pin: &ResolvedPin) -> Result<PathBuf> {
     let destination = cache.source_path(pin)?;
     if destination.join("Package.swift").exists() {
         return Ok(destination);
+    }
+    let _lock = cache.lock("sources", &destination.to_string_lossy())?;
+    if destination.join("Package.swift").exists() {
+        return Ok(destination);
+    }
+    if destination.exists() {
+        fs::remove_dir_all(&destination)?;
     }
     let parent = destination
         .parent()
@@ -128,10 +136,13 @@ fn ensure_source(cache: &Cache, pin: &ResolvedPin) -> Result<PathBuf> {
         shallow_fetch_checkout(pin, temp.path())?;
     }
 
-    if destination.exists() {
-        fs::remove_dir_all(&destination)?;
+    match fs::rename(temp.keep(), &destination) {
+        Ok(()) => {}
+        Err(error) if destination.join("Package.swift").exists() => {
+            let _ = error;
+        }
+        Err(error) => return Err(error.into()),
     }
-    fs::rename(temp.keep(), &destination)?;
     Ok(destination)
 }
 
@@ -140,6 +151,15 @@ fn download_github_archive(cache: &Cache, pin: &ResolvedPin, destination: &Path)
     let revision = pin.revision()?;
     let archive_path = cache.archive_path(&pin.location, revision);
     if !archive_path.exists() {
+        let _lock = cache.lock("archives", &archive_path.to_string_lossy())?;
+        if archive_path.exists() {
+            let file = fs::File::open(&archive_path)?;
+            let gzip = GzDecoder::new(file);
+            let mut archive = tar::Archive::new(gzip);
+            archive.unpack(destination)?;
+            flatten_single_directory(destination)?;
+            return Ok(());
+        }
         let url = format!(
             "https://api.github.com/repos/{}/{}/tarball/{}",
             github.owner, github.repo, revision
@@ -153,7 +173,7 @@ fn download_github_archive(cache: &Cache, pin: &ResolvedPin, destination: &Path)
         }
         let response = request.send()?.error_for_status()?;
         let bytes = response.bytes()?;
-        fs::write(&archive_path, bytes)?;
+        atomic_write(&archive_path, &bytes)?;
     }
 
     let file = fs::File::open(&archive_path)?;
