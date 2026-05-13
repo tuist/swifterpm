@@ -1,0 +1,5 @@
+/target
+/dist
+/.build
+/server
+/xcode_processor

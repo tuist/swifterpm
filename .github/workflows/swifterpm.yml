@@ -1,0 +1,100 @@
+name: swifterpm
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: swifterpm-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+  RUST_BACKTRACE: "1"
+  MISE_VERSION: "2026.4.18"
+  MISE_GITHUB_ATTESTATIONS: "0"
+
+jobs:
+  formatted:
+    name: formatted
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mise tools
+        uses: jdx/mise-action@v4.0.1
+        with:
+          version: ${{ env.MISE_VERSION }}
+          cache: true
+          install_args: rust
+
+      - name: Install rustfmt
+        run: rustup component add rustfmt
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: formatted
+          cache-on-failure: true
+          cache-bin: true
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mise tools
+        uses: jdx/mise-action@v4.0.1
+        with:
+          version: ${{ env.MISE_VERSION }}
+          cache: true
+          install_args: rust
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test-${{ matrix.os }}
+          cache-on-failure: true
+          cache-bin: true
+
+      - name: Run tests
+        run: cargo test --locked --all-targets
+
+  build:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mise tools
+        uses: jdx/mise-action@v4.0.1
+        with:
+          version: ${{ env.MISE_VERSION }}
+          cache: true
+          install_args: rust
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: build-${{ matrix.os }}
+          cache-on-failure: true
+          cache-bin: true
+
+      - name: Build release binary
+        run: cargo build --locked --release
