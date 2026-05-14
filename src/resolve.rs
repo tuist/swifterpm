@@ -12,6 +12,7 @@ use pubgrub::{
     Dependencies, DependencyConstraints, DependencyProvider, PackageResolutionStatistics, Ranges,
     resolve as pubgrub_resolve,
 };
+use rayon::prelude::*;
 use semver::Version;
 use sha2::{Digest, Sha256};
 
@@ -209,10 +210,12 @@ impl<'a> NativeDependencyProvider<'a> {
                 revision: None,
             }],
         );
-        self.dependencies
-            .lock()
-            .unwrap()
-            .insert((PackageKey::Root, root_version.clone()), root_dependencies);
+        self.dependencies.lock().unwrap().insert(
+            (PackageKey::Root, root_version.clone()),
+            root_dependencies.clone(),
+        );
+
+        self.prewarm(root_dependencies);
 
         let selected = pubgrub_resolve(self, PackageKey::Root, root_version)
             .map_err(|error| anyhow!("failed to solve dependency graph: {error:?}"))?;
@@ -229,6 +232,65 @@ impl<'a> NativeDependencyProvider<'a> {
             .collect::<Result<Vec<_>>>()?;
         pins.extend(self.fixed_pins.lock().unwrap().values().cloned());
         Ok(pins)
+    }
+
+    fn prewarm(&self, root_dependencies: Vec<(PackageKey, Ranges<Version>)>) {
+        let mut frontier: Vec<(PackageKey, Ranges<Version>)> = root_dependencies;
+        let mut visited: BTreeSet<PackageKey> = BTreeSet::new();
+
+        while !frontier.is_empty() {
+            // Wave 1: fetch version lists in parallel.
+            frontier.par_iter().for_each(|(package, _)| {
+                let _ = self.resolved_versions(package);
+            });
+
+            // Wave 2: for each package, pick a candidate version, then materialize
+            // and parse its manifest in parallel. We approximate PubGrub's choice
+            // (max stable in range, fall back to max pre-release) so the cache is
+            // populated with the version the solver is most likely to ask for.
+            let candidates: Vec<(PackageKey, Version)> = frontier
+                .par_iter()
+                .filter_map(|(package, range)| {
+                    let versions = self.resolved_versions(package).ok()?;
+                    let mut matching = versions
+                        .into_iter()
+                        .rev()
+                        .filter(|version| range.contains(&version.version))
+                        .peekable();
+                    let chosen = matching
+                        .clone()
+                        .find(|version| version.version.pre.is_empty())
+                        .or_else(|| matching.next())?;
+                    Some((package.clone(), chosen.version))
+                })
+                .collect();
+
+            let discovered: Vec<(PackageKey, Ranges<Version>)> = candidates
+                .par_iter()
+                .flat_map(|(package, version)| {
+                    self.dependencies_for(package, version)
+                        .ok()
+                        .unwrap_or_default()
+                })
+                .collect();
+
+            for (package, _) in &frontier {
+                visited.insert(package.clone());
+            }
+
+            let mut next: Vec<(PackageKey, Ranges<Version>)> = Vec::new();
+            let mut seen = BTreeSet::new();
+            for (package, range) in discovered {
+                if visited.contains(&package) {
+                    continue;
+                }
+                if !seen.insert(package.clone()) {
+                    continue;
+                }
+                next.push((package, range));
+            }
+            frontier = next;
+        }
     }
 
     fn resolved_versions(&self, package: &PackageKey) -> Result<Vec<ResolvedVersion>> {

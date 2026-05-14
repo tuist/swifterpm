@@ -1,8 +1,12 @@
-use std::{collections::BTreeSet, path::Path, process::Command};
+use std::{collections::BTreeSet, fs, path::Path, process::Command};
 
 use anyhow::{Context, Result, anyhow, bail};
 use semver::Version;
 use serde_json::Value;
+
+use crate::util::atomic_write;
+
+const MANIFEST_CACHE_FILE: &str = ".swifterpm-manifest.json";
 
 #[derive(Debug, Clone)]
 pub(crate) struct ManifestDependency {
@@ -39,6 +43,10 @@ pub(crate) fn dump_package(package_dir: &Path, disable_sandbox: bool) -> Result<
 }
 
 pub(crate) fn dump_package_json(package_dir: &Path, disable_sandbox: bool) -> Result<Vec<u8>> {
+    if let Some(cached) = read_cached_manifest(package_dir) {
+        return Ok(cached);
+    }
+
     let mut command = Command::new("swift");
     command.arg("package");
     if disable_sandbox {
@@ -55,7 +63,19 @@ pub(crate) fn dump_package_json(package_dir: &Path, disable_sandbox: bool) -> Re
             String::from_utf8_lossy(&output.stderr)
         );
     }
+    let _ = atomic_write(&package_dir.join(MANIFEST_CACHE_FILE), &output.stdout);
     Ok(output.stdout)
+}
+
+fn read_cached_manifest(package_dir: &Path) -> Option<Vec<u8>> {
+    let cache_path = package_dir.join(MANIFEST_CACHE_FILE);
+    let manifest_path = package_dir.join("Package.swift");
+    let cache_mtime = fs::metadata(&cache_path).ok()?.modified().ok()?;
+    let manifest_mtime = fs::metadata(&manifest_path).ok()?.modified().ok()?;
+    if cache_mtime < manifest_mtime {
+        return None;
+    }
+    fs::read(&cache_path).ok()
 }
 
 pub(crate) fn parse_manifest_dependencies(manifest: &Value) -> Result<Vec<ManifestDependency>> {
