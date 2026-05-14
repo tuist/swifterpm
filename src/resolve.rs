@@ -12,7 +12,6 @@ use pubgrub::{
     Dependencies, DependencyConstraints, DependencyProvider, PackageResolutionStatistics, Ranges,
     resolve as pubgrub_resolve,
 };
-use rayon::prelude::*;
 use semver::Version;
 use sha2::{Digest, Sha256};
 
@@ -235,62 +234,51 @@ impl<'a> NativeDependencyProvider<'a> {
     }
 
     fn prewarm(&self, root_dependencies: Vec<(PackageKey, Ranges<Version>)>) {
-        let mut frontier: Vec<(PackageKey, Ranges<Version>)> = root_dependencies;
-        let mut visited: BTreeSet<PackageKey> = BTreeSet::new();
-
-        while !frontier.is_empty() {
-            // Wave 1: fetch version lists in parallel.
-            frontier.par_iter().for_each(|(package, _)| {
-                let _ = self.resolved_versions(package);
-            });
-
-            // Wave 2: for each package, pick a candidate version, then materialize
-            // and parse its manifest in parallel. We approximate PubGrub's choice
-            // (max stable in range, fall back to max pre-release) so the cache is
-            // populated with the version the solver is most likely to ask for.
-            let candidates: Vec<(PackageKey, Version)> = frontier
-                .par_iter()
-                .filter_map(|(package, range)| {
-                    let versions = self.resolved_versions(package).ok()?;
-                    let mut matching = versions
-                        .into_iter()
-                        .rev()
-                        .filter(|version| range.contains(&version.version))
-                        .peekable();
-                    let chosen = matching
-                        .clone()
-                        .find(|version| version.version.pre.is_empty())
-                        .or_else(|| matching.next())?;
-                    Some((package.clone(), chosen.version))
-                })
-                .collect();
-
-            let discovered: Vec<(PackageKey, Ranges<Version>)> = candidates
-                .par_iter()
-                .flat_map(|(package, version)| {
-                    self.dependencies_for(package, version)
-                        .ok()
-                        .unwrap_or_default()
-                })
-                .collect();
-
-            for (package, _) in &frontier {
-                visited.insert(package.clone());
+        // Streaming dispatch: each package gets a rayon task that fetches its
+        // versions, materializes the candidate, and dumps its manifest. As soon
+        // as transitives are discovered, they get their own tasks — there is no
+        // wave barrier, so a fast-finishing parent does not have to wait for
+        // its slower siblings before spawning its children.
+        let visited: Mutex<BTreeSet<PackageKey>> = Mutex::new(BTreeSet::new());
+        rayon::scope(|scope| {
+            for dep in root_dependencies {
+                self.spawn_prewarm(scope, dep, &visited);
             }
+        });
+    }
 
-            let mut next: Vec<(PackageKey, Ranges<Version>)> = Vec::new();
-            let mut seen = BTreeSet::new();
-            for (package, range) in discovered {
-                if visited.contains(&package) {
-                    continue;
-                }
-                if !seen.insert(package.clone()) {
-                    continue;
-                }
-                next.push((package, range));
-            }
-            frontier = next;
+    fn spawn_prewarm<'scope>(
+        &'scope self,
+        scope: &rayon::Scope<'scope>,
+        (package, range): (PackageKey, Ranges<Version>),
+        visited: &'scope Mutex<BTreeSet<PackageKey>>,
+    ) {
+        if !visited.lock().unwrap().insert(package.clone()) {
+            return;
         }
+        scope.spawn(move |scope| {
+            let Ok(versions) = self.resolved_versions(&package) else {
+                return;
+            };
+            let mut matching = versions
+                .into_iter()
+                .rev()
+                .filter(|version| range.contains(&version.version))
+                .peekable();
+            let Some(chosen) = matching
+                .clone()
+                .find(|version| version.version.pre.is_empty())
+                .or_else(|| matching.next())
+            else {
+                return;
+            };
+            let Ok(transitives) = self.dependencies_for(&package, &chosen.version) else {
+                return;
+            };
+            for dep in transitives {
+                self.spawn_prewarm(scope, dep, visited);
+            }
+        });
     }
 
     fn resolved_versions(&self, package: &PackageKey) -> Result<Vec<ResolvedVersion>> {

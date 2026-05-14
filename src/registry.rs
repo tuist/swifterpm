@@ -18,7 +18,7 @@ use sha2::{Digest, Sha256};
 use crate::{
     cache::Cache,
     resolved::registry_identity_parts,
-    util::{atomic_write, flatten_single_directory},
+    util::{atomic_write, flatten_single_directory, http_client},
 };
 
 const ACCEPT_JSON: &str = "application/vnd.swift.registry.v1+json";
@@ -341,11 +341,8 @@ fn package_url(registry_url: &Url, identity: &str, version: Option<&str>) -> Res
     Ok(url)
 }
 
-fn registry_client() -> Client {
-    Client::builder()
-        .user_agent("swifterpm/0.1")
-        .build()
-        .expect("failed to construct registry HTTP client")
+fn registry_client() -> &'static Client {
+    http_client()
 }
 
 fn parse_registry_url(url: &str) -> Result<Url> {

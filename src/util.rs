@@ -3,11 +3,26 @@ use std::{
     io,
     path::Path,
     process::Command,
+    sync::OnceLock,
 };
 
 use anyhow::{Result, bail};
 use fs2::FileExt;
+use reqwest::blocking::Client;
 use sha2::{Digest, Sha256};
+
+/// Shared HTTPS client. Reuses TLS connections across calls — relevant when we
+/// fan out parallel fetches to api.github.com and codeload.github.com.
+pub(crate) fn http_client() -> &'static Client {
+    static CLIENT: OnceLock<Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        Client::builder()
+            .user_agent("swifterpm/0.1")
+            .pool_max_idle_per_host(16)
+            .build()
+            .expect("failed to construct HTTP client")
+    })
+}
 
 pub(crate) fn command_output(command: &mut Command) -> Result<String> {
     let output = command.output()?;

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     cache::Cache,
     github::{GitHubRepo, github_token},
-    util::{atomic_write, command_output},
+    util::{atomic_write, command_output, http_client},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -102,9 +102,7 @@ fn github_remote_versions(repo: &GitHubRepo) -> Result<Vec<RemoteVersion>> {
         sha: String,
     }
 
-    let client = reqwest::blocking::Client::builder()
-        .user_agent("swifterpm/0.1")
-        .build()?;
+    let client = http_client();
     let mut page = 1;
     let mut versions = Vec::new();
     loop {

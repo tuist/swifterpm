@@ -20,7 +20,7 @@ use crate::{
         is_source_control_kind, registry_download_subpath,
     },
     util::{
-        atomic_write, flatten_single_directory, lock_path,
+        atomic_write, flatten_single_directory, http_client, lock_path,
         replace_with_symlinked_directory_contents, run,
     },
 };
@@ -335,10 +335,7 @@ fn download_github_archive(cache: &Cache, pin: &ResolvedPin, destination: &Path)
             "https://api.github.com/repos/{}/{}/tarball/{}",
             github.owner, github.repo, revision
         );
-        let client = reqwest::blocking::Client::builder()
-            .user_agent("swifterpm/0.1")
-            .build()?;
-        let mut request = client.get(url);
+        let mut request = http_client().get(url);
         if let Some(token) = github_token() {
             request = request.bearer_auth(token);
         }
