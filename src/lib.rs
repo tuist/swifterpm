@@ -4,6 +4,7 @@ mod cache;
 mod github;
 mod manifest;
 mod package_info_cache;
+mod registry;
 mod remote;
 mod resolve;
 mod resolved;
@@ -22,6 +23,7 @@ mod tests {
     use crate::{
         manifest::{
             Requirement, parse_manifest_dependencies, parse_manifest_file_system_dependencies,
+            parse_required_manifest_dependencies,
         },
         remote::parse_swift_tag_version,
         resolved::{ResolvedPins, cache_test_path, checkout_directory_name},
@@ -63,12 +65,27 @@ mod tests {
                             }
                         }
                     ]
+                },
+                {
+                    "sourceControl": [
+                        {
+                            "identity": "local-package",
+                            "location": {
+                                "local": [
+                                    "/tmp/local-package"
+                                ]
+                            },
+                            "requirement": {
+                                "exact": ["1.2.3"]
+                            }
+                        }
+                    ]
                 }
             ]
         });
 
         let dependencies = parse_manifest_dependencies(&manifest).unwrap();
-        assert_eq!(dependencies.len(), 1);
+        assert_eq!(dependencies.len(), 3);
         assert_eq!(dependencies[0].identity, "alamofire");
         assert_eq!(
             dependencies[0].location,
@@ -78,6 +95,92 @@ mod tests {
             dependencies[0].requirement,
             Requirement::Range { .. }
         ));
+        assert_eq!(dependencies[1].identity, "apple.swift-log");
+        assert_eq!(dependencies[1].location, "apple.swift-log");
+        assert!(matches!(
+            dependencies[1].requirement,
+            Requirement::Range { .. }
+        ));
+        assert_eq!(dependencies[2].identity, "local-package");
+        assert_eq!(dependencies[2].location, "/tmp/local-package");
+        assert!(matches!(dependencies[2].requirement, Requirement::Exact(_)));
+    }
+
+    #[test]
+    fn parses_only_manifest_dependencies_referenced_by_targets() {
+        let manifest = json!({
+            "dependencies": [
+                {
+                    "sourceControl": [
+                        {
+                            "identity": "swift-custom-dump",
+                            "location": {
+                                "remote": [
+                                    { "urlString": "https://github.com/pointfreeco/swift-custom-dump.git" }
+                                ]
+                            },
+                            "requirement": {
+                                "range": [
+                                    { "lowerBound": "1.0.0", "upperBound": "2.0.0" }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "sourceControl": [
+                        {
+                            "identity": "carton",
+                            "location": {
+                                "remote": [
+                                    { "urlString": "https://github.com/swiftwasm/carton" }
+                                ]
+                            },
+                            "requirement": {
+                                "range": [
+                                    { "lowerBound": "1.0.0", "upperBound": "2.0.0" }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "registry": [
+                        {
+                            "identity": "tuist.FileSystem",
+                            "requirement": {
+                                "range": [
+                                    { "lowerBound": "0.18.0", "upperBound": "1.0.0" }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ],
+            "targets": [
+                {
+                    "name": "App",
+                    "type": "regular",
+                    "dependencies": [
+                        { "product": ["CustomDump", "swift-custom-dump", null, null] },
+                        { "byName": ["FileSystem", null] }
+                    ]
+                }
+            ],
+            "products": [
+                {
+                    "name": "App",
+                    "targets": ["App"],
+                    "type": { "library": ["automatic"] }
+                }
+            ]
+        });
+
+        let dependencies = parse_required_manifest_dependencies(&manifest).unwrap();
+
+        assert_eq!(dependencies.len(), 2);
+        assert_eq!(dependencies[0].identity, "swift-custom-dump");
+        assert_eq!(dependencies[1].identity, "tuist.FileSystem");
     }
 
     #[test]

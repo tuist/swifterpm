@@ -20,13 +20,23 @@ impl Cache {
         };
         fs::create_dir_all(root.join("sources"))?;
         fs::create_dir_all(root.join("archives"))?;
+        fs::create_dir_all(root.join("registry/archives"))?;
         fs::create_dir_all(root.join("metadata/remotes"))?;
+        fs::create_dir_all(root.join("metadata/registries"))?;
         fs::create_dir_all(root.join("locks"))?;
         fs::create_dir_all(root.join("virtual/checkouts"))?;
         Ok(Self { root })
     }
 
     pub(crate) fn source_path(&self, pin: &ResolvedPin) -> Result<PathBuf> {
+        if pin.kind == "registry" {
+            return Ok(self
+                .root
+                .join("sources")
+                .join(&pin.identity)
+                .join(format!("{}-registry", pin.version()?)));
+        }
+
         let version = pin
             .state
             .version
@@ -48,10 +58,26 @@ impl Cache {
         ))
     }
 
+    pub(crate) fn registry_archive_path(&self, identity: &str, version: &str) -> PathBuf {
+        self.root.join("registry/archives").join(format!(
+            "{}-{}.zip",
+            stable_hash(identity),
+            version
+        ))
+    }
+
     pub(crate) fn remote_versions_path(&self, location: &str) -> PathBuf {
         self.root
             .join("metadata/remotes")
             .join(format!("{}.json", stable_hash(location)))
+    }
+
+    pub(crate) fn registry_versions_path(&self, registry_url: &str, identity: &str) -> PathBuf {
+        self.root.join("metadata/registries").join(format!(
+            "{}-{}.json",
+            stable_hash(registry_url),
+            stable_hash(identity)
+        ))
     }
 
     pub(crate) fn lock(&self, namespace: &str, key: &str) -> Result<PathLock> {

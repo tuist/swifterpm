@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand};
 use crate::{
     cache::Cache,
     package_info_cache::write_package_info_cache,
+    registry::RegistryConfig,
     resolve::resolve_package,
     resolved::{print_resolution, read_resolved_file, write_resolved_file},
     restore::{restore_package, write_workspace_state},
@@ -59,7 +60,7 @@ struct Cli {
     /// Resolve exclusively from Package.resolved.
     #[arg(long, global = true)]
     only_use_versions_from_resolved_file: bool,
-    /// Accepted for SwiftPM command compatibility. Registry resolution is not implemented yet.
+    /// Accepted for SwiftPM command compatibility.
     #[arg(long, global = true)]
     replace_scm_with_registry: bool,
     /// Accepted for SwiftPM command compatibility.
@@ -200,8 +201,9 @@ pub fn run() -> Result<()> {
             let cache = Cache::new(cli_cache_dir(&cli, cache_dir.as_ref()))?;
             let package = canonical_package_dir(command_package_dir(&cli, package_dir))?;
             let scratch = command_scratch_dir(&cli, &package, scratch_dir.as_ref());
+            let registry_config = cli_registry_config(&cli, &package)?;
             let resolved = read_resolved_file(&package)?;
-            restore_package(&scratch, &cache, &resolved, cli.quiet)?;
+            restore_package(&scratch, &cache, &registry_config, &resolved, cli.quiet)?;
             maybe_write_package_info_cache(&cli, &package, &scratch, &resolved)?;
             write_workspace_state(&package, &scratch, &resolved, cli.disable_sandbox)
         }
@@ -219,6 +221,7 @@ fn run_resolution_command(
     let cache = Cache::new(cli_cache_dir(cli, cache_dir))?;
     let package = canonical_package_dir(command_package_dir(cli, package_dir))?;
     let scratch = command_scratch_dir(cli, &package, None);
+    let registry_config = cli_registry_config(cli, &package)?;
     let read_only = cli.force_resolved_versions
         || cli.disable_automatic_resolution
         || cli.only_use_versions_from_resolved_file;
@@ -227,7 +230,7 @@ fn run_resolution_command(
         read_resolved_file(&package)
             .with_context(|| format!("failed to read Package.resolved for {}", package.display()))?
     } else {
-        let resolved = resolve_package(&package, &cache, cli.disable_sandbox)?;
+        let resolved = resolve_package(&package, &cache, &registry_config, cli.disable_sandbox)?;
         if should_write(write, print_only) {
             write_resolved_file(&package, &resolved)?;
         }
@@ -238,7 +241,7 @@ fn run_resolution_command(
         print_resolution(&resolved);
     }
     if should_restore(restore, print_only) {
-        restore_package(&scratch, &cache, &resolved, cli.quiet)?;
+        restore_package(&scratch, &cache, &registry_config, &resolved, cli.quiet)?;
         maybe_write_package_info_cache(cli, &package, &scratch, &resolved)?;
         write_workspace_state(&package, &scratch, &resolved, cli.disable_sandbox)?;
     }
@@ -288,6 +291,14 @@ fn cli_cache_dir(cli: &Cli, command_cache_dir: Option<&PathBuf>) -> Option<PathB
     command_cache_dir
         .cloned()
         .or_else(|| cli.cache_path.clone())
+}
+
+fn cli_registry_config(cli: &Cli, package: &std::path::Path) -> Result<RegistryConfig> {
+    RegistryConfig::load(
+        package,
+        cli.config_path.as_deref(),
+        cli.default_registry_url.as_deref(),
+    )
 }
 
 fn command_package_dir(cli: &Cli, command_package_dir: &PathBuf) -> PathBuf {

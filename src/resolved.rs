@@ -40,6 +40,13 @@ impl ResolvedPin {
             .as_deref()
             .ok_or_else(|| anyhow!("{} does not have a source-control revision", self.identity))
     }
+
+    pub(crate) fn version(&self) -> Result<&str> {
+        self.state
+            .version
+            .as_deref()
+            .ok_or_else(|| anyhow!("{} does not have a resolved version", self.identity))
+    }
 }
 
 pub(crate) fn read_resolved_file(package_dir: &Path) -> Result<ResolvedPins> {
@@ -58,6 +65,15 @@ pub(crate) fn write_resolved_file(package_dir: &Path, resolved: &ResolvedPins) -
 
 pub(crate) fn print_resolution(resolved: &ResolvedPins) {
     for pin in &resolved.pins {
+        if is_registry_kind(&pin.kind) {
+            println!(
+                "{} {} registry",
+                pin.identity,
+                pin.state.version.as_deref().unwrap_or("<unknown>")
+            );
+            continue;
+        }
+
         if let Some(version) = &pin.state.version {
             println!(
                 "{} {} {} {}",
@@ -81,6 +97,10 @@ pub(crate) fn is_source_control_kind(kind: &str) -> bool {
     matches!(kind, "remoteSourceControl" | "sourceControl")
 }
 
+pub(crate) fn is_registry_kind(kind: &str) -> bool {
+    kind == "registry"
+}
+
 pub(crate) fn checkout_directory_name(pin: &ResolvedPin) -> String {
     pin.location
         .trim_end_matches(".git")
@@ -90,6 +110,17 @@ pub(crate) fn checkout_directory_name(pin: &ResolvedPin) -> String {
         .filter(|name| !name.is_empty())
         .unwrap_or(&pin.identity)
         .to_string()
+}
+
+pub(crate) fn registry_download_subpath(pin: &ResolvedPin) -> Result<String> {
+    let (scope, name) = registry_identity_parts(&pin.identity)?;
+    Ok(format!("{scope}/{name}/{}", pin.version()?))
+}
+
+pub(crate) fn registry_identity_parts(identity: &str) -> Result<(&str, &str)> {
+    identity
+        .split_once('.')
+        .ok_or_else(|| anyhow!("{identity} is not a scoped registry package identity"))
 }
 
 #[cfg(test)]
