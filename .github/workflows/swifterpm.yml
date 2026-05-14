@@ -14,19 +14,19 @@ env:
   CARGO_INCREMENTAL: "0"
   CARGO_NET_RETRY: "10"
   RUSTUP_MAX_RETRIES: "10"
-  RUST_BACKTRACE: "1"
   MISE_VERSION: "2026.4.18"
   MISE_GITHUB_ATTESTATIONS: "0"
+  RUST_BACKTRACE: "1"
 
 jobs:
   formatted:
     name: formatted
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Install mise tools
-        uses: jdx/mise-action@v4.0.1
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
         with:
           version: ${{ env.MISE_VERSION }}
           cache: true
@@ -36,7 +36,7 @@ jobs:
         run: rustup component add rustfmt
 
       - name: Cache Rust
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
         with:
           shared-key: formatted
           cache-on-failure: true
@@ -53,17 +53,17 @@ jobs:
       matrix:
         os: [ubuntu-24.04, macos-15, windows-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Install mise tools
-        uses: jdx/mise-action@v4.0.1
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
         with:
           version: ${{ env.MISE_VERSION }}
           cache: true
           install_args: rust
 
       - name: Cache Rust
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
         with:
           shared-key: test-${{ matrix.os }}
           cache-on-failure: true
@@ -76,17 +76,17 @@ jobs:
     name: shellspec
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Install mise tools
-        uses: jdx/mise-action@v4.0.1
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
         with:
           version: ${{ env.MISE_VERSION }}
           cache: true
           install_args: rust shellspec jq
 
       - name: Cache Rust
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
         with:
           shared-key: shellspec
           cache-on-failure: true
@@ -103,17 +103,17 @@ jobs:
       matrix:
         os: [ubuntu-24.04, macos-15, windows-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Install mise tools
-        uses: jdx/mise-action@v4.0.1
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
         with:
           version: ${{ env.MISE_VERSION }}
           cache: true
           install_args: rust
 
       - name: Cache Rust
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
         with:
           shared-key: build-${{ matrix.os }}
           cache-on-failure: true
