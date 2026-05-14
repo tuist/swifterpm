@@ -17,6 +17,7 @@ Tuist generated projects gave us a clean contract to replace: package resolution
 
 - **Lockfile fast path**: When `Package.resolved` is available, `swifterpm` can use `--force-resolved-versions` to skip dependency solving and restore exactly the pinned revisions.
 - **GitHub archives first**: For GitHub dependencies, it downloads source tarballs for pinned revisions instead of cloning full repositories. A shallow Git fetch is kept as a fallback.
+- **Swift registry archives**: Registry packages declared with `.package(id:)` are resolved through SwiftPM-compatible registry configuration, downloaded as checksum-verified ZIP archives, and restored under `.build/registry/downloads`.
 - **XDG global source cache**: Archives and extracted source trees are stored once under `$XDG_CACHE_HOME/swifterpm`, or `~/.cache/swifterpm` when `XDG_CACHE_HOME` is unset, keyed by package identity, version, and revision.
 - **Project-local checkout shells**: `.build/checkouts` entries stay as real directories whose contents link back to the global cache, so Xcode and Tuist-relative paths keep resolving inside the worktree.
 - **Concurrent-safe writes**: Package restoration runs in parallel, while cache writes use file locks, temporary files, and atomic moves so multiple installs can share the same cache safely.
@@ -48,7 +49,7 @@ Or run without changing your mise config:
 mise x github:tuist/swifterpm@latest -- swifterpm --package-path . --force-resolved-versions resolve
 ```
 
-Useful SwiftPM-shaped flags are supported, including `--package-path`, `--cache-path`, `--scratch-path`, `--build-path`, `--skip-update`, `--force-resolved-versions`, `--disable-automatic-resolution`, and `--only-use-versions-from-resolved-file`.
+Useful SwiftPM-shaped flags are supported, including `--package-path`, `--cache-path`, `--scratch-path`, `--build-path`, `--config-path`, `--default-registry-url`, `--skip-update`, `--force-resolved-versions`, `--disable-automatic-resolution`, and `--only-use-versions-from-resolved-file`.
 
 ## Benchmarks 📊
 

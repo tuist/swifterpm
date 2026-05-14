@@ -14,7 +14,11 @@ use crate::{
     cache::Cache,
     github::{GitHubRepo, github_token},
     manifest::{dump_package, parse_manifest_file_system_dependencies},
-    resolved::{ResolvedPin, ResolvedPins, checkout_directory_name, is_source_control_kind},
+    registry::{RegistryConfig, download_registry_archive},
+    resolved::{
+        ResolvedPin, ResolvedPins, checkout_directory_name, is_registry_kind,
+        is_source_control_kind, registry_download_subpath,
+    },
     util::{
         atomic_write, flatten_single_directory, lock_path,
         replace_with_symlinked_directory_contents, run,
@@ -24,21 +28,30 @@ use crate::{
 pub(crate) fn restore_package(
     scratch_dir: &Path,
     cache: &Cache,
+    registry_config: &RegistryConfig,
     resolved: &ResolvedPins,
     quiet: bool,
 ) -> Result<()> {
     let _scratch_lock = lock_path(&scratch_dir.join(".swifterpm.lock"))?;
     let checkouts = scratch_dir.join("checkouts");
+    let registry_downloads = scratch_dir.join("registry/downloads");
     fs::create_dir_all(&checkouts)?;
+    fs::create_dir_all(&registry_downloads)?;
 
-    let pins = resolved
+    let source_pins = resolved
         .pins
         .iter()
         .filter(|pin| is_source_control_kind(&pin.kind))
         .cloned()
         .collect::<Vec<_>>();
-    let skipped = resolved.pins.len() - pins.len();
-    let restored = pins
+    let registry_pins = resolved
+        .pins
+        .iter()
+        .filter(|pin| is_registry_kind(&pin.kind))
+        .cloned()
+        .collect::<Vec<_>>();
+    let skipped = resolved.pins.len() - source_pins.len() - registry_pins.len();
+    let restored_sources = source_pins
         .par_iter()
         .map(|pin| {
             let source = ensure_source(cache, pin)
@@ -48,20 +61,38 @@ pub(crate) fn restore_package(
             Ok((pin.identity.clone(), source))
         })
         .collect::<Result<Vec<_>>>()?;
+    let restored_registry = registry_pins
+        .par_iter()
+        .map(|pin| {
+            let source = ensure_registry_source(cache, registry_config, pin)
+                .with_context(|| format!("failed to materialize {}", pin.identity))?;
+            let download = registry_downloads.join(registry_download_subpath(pin)?);
+            replace_with_symlinked_directory_contents(&source, &download)?;
+            Ok((pin.identity.clone(), source))
+        })
+        .collect::<Result<Vec<_>>>()?;
 
     if !quiet {
-        for (identity, source) in &restored {
+        for (identity, source) in &restored_sources {
+            println!("restored {} -> {}", identity, source.display());
+        }
+        for (identity, source) in &restored_registry {
             println!("restored {} -> {}", identity, source.display());
         }
     }
     if !quiet {
         println!(
             "restored {} source-control packages into {}",
-            restored.len(),
+            restored_sources.len(),
             checkouts.display()
         );
+        println!(
+            "restored {} registry packages into {}",
+            restored_registry.len(),
+            registry_downloads.display()
+        );
         if skipped > 0 {
-            println!("skipped {skipped} non-source-control pins");
+            println!("skipped {skipped} unsupported pins");
         }
     }
     Ok(())
@@ -76,35 +107,50 @@ pub(crate) fn write_workspace_state(
     let mut dependencies = Vec::new();
     let mut artifacts = Vec::new();
     for pin in &resolved.pins {
-        if !is_source_control_kind(&pin.kind) {
-            continue;
-        }
+        if is_source_control_kind(&pin.kind) {
+            let mut checkout_state = serde_json::Map::new();
+            if let Some(branch) = &pin.state.branch {
+                checkout_state.insert("branch".to_string(), json!(branch));
+            }
+            checkout_state.insert("revision".to_string(), json!(pin.revision()?));
+            if let Some(version) = &pin.state.version {
+                checkout_state.insert("version".to_string(), json!(version));
+            }
 
-        let mut checkout_state = serde_json::Map::new();
-        if let Some(branch) = &pin.state.branch {
-            checkout_state.insert("branch".to_string(), json!(branch));
-        }
-        checkout_state.insert("revision".to_string(), json!(pin.revision()?));
-        if let Some(version) = &pin.state.version {
-            checkout_state.insert("version".to_string(), json!(version));
-        }
+            dependencies.push(json!({
+                "basedOn": null,
+                "packageRef": {
+                    "identity": pin.identity,
+                    "kind": pin.kind,
+                    "location": pin.location,
+                    "name": checkout_directory_name(pin)
+                },
+                "state": {
+                    "checkoutState": Value::Object(checkout_state),
+                    "name": "sourceControlCheckout"
+                },
+                "subpath": checkout_directory_name(pin)
+            }));
 
-        dependencies.push(json!({
-            "basedOn": null,
-            "packageRef": {
-                "identity": pin.identity,
-                "kind": pin.kind,
-                "location": pin.location,
-                "name": checkout_directory_name(pin)
-            },
-            "state": {
-                "checkoutState": Value::Object(checkout_state),
-                "name": "sourceControlCheckout"
-            },
-            "subpath": checkout_directory_name(pin)
-        }));
+            artifacts.extend(discover_artifacts(scratch_dir, pin)?);
+        } else if is_registry_kind(&pin.kind) {
+            dependencies.push(json!({
+                "basedOn": null,
+                "packageRef": {
+                    "identity": pin.identity,
+                    "kind": "registry",
+                    "location": pin.identity,
+                    "name": pin.identity
+                },
+                "state": {
+                    "name": "registryDownload",
+                    "version": pin.version()?
+                },
+                "subpath": registry_download_subpath(pin)?
+            }));
 
-        artifacts.extend(discover_artifacts(scratch_dir, pin)?);
+            artifacts.extend(discover_artifacts(scratch_dir, pin)?);
+        }
     }
 
     let manifest = dump_package(package_dir, disable_sandbox).with_context(|| {
@@ -126,7 +172,10 @@ pub(crate) fn write_workspace_state(
                 "name": name,
                 "path": path.clone()
             },
-            "state": null,
+            "state": {
+                "name": "fileSystem",
+                "path": path.clone()
+            },
             "subpath": identity
         }));
     }
@@ -193,7 +242,7 @@ fn collect_artifacts(
     Ok(())
 }
 
-fn ensure_source(cache: &Cache, pin: &ResolvedPin) -> Result<PathBuf> {
+pub(crate) fn ensure_source(cache: &Cache, pin: &ResolvedPin) -> Result<PathBuf> {
     let destination = cache.source_path(pin)?;
     if destination.join("Package.swift").exists() {
         return Ok(destination);
@@ -216,6 +265,46 @@ fn ensure_source(cache: &Cache, pin: &ResolvedPin) -> Result<PathBuf> {
         reset_directory(temp.path())?;
         shallow_fetch_checkout(pin, temp.path())?;
     }
+
+    match fs::rename(temp.keep(), &destination) {
+        Ok(()) => {}
+        Err(error) if destination.join("Package.swift").exists() => {
+            let _ = error;
+        }
+        Err(error) => return Err(error.into()),
+    }
+    Ok(destination)
+}
+
+pub(crate) fn ensure_registry_source(
+    cache: &Cache,
+    registry_config: &RegistryConfig,
+    pin: &ResolvedPin,
+) -> Result<PathBuf> {
+    let destination = cache.source_path(pin)?;
+    if destination.join("Package.swift").exists() {
+        return Ok(destination);
+    }
+    let _lock = cache.lock("sources", &destination.to_string_lossy())?;
+    if destination.join("Package.swift").exists() {
+        return Ok(destination);
+    }
+    if destination.exists() {
+        fs::remove_dir_all(&destination)?;
+    }
+    let parent = destination
+        .parent()
+        .ok_or_else(|| anyhow!("cache destination has no parent"))?;
+    fs::create_dir_all(parent)?;
+
+    let temp = tempfile::tempdir_in(parent)?;
+    download_registry_archive(
+        cache,
+        registry_config,
+        &pin.identity,
+        pin.version()?,
+        temp.path(),
+    )?;
 
     match fs::rename(temp.keep(), &destination) {
         Ok(()) => {}

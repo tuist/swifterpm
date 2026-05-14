@@ -12,7 +12,10 @@ use serde_json::Value;
 
 use crate::{
     manifest::{dump_package_json, parse_manifest_file_system_dependencies},
-    resolved::{ResolvedPin, ResolvedPins, checkout_directory_name, is_source_control_kind},
+    resolved::{
+        ResolvedPin, ResolvedPins, checkout_directory_name, is_registry_kind,
+        is_source_control_kind, registry_download_subpath,
+    },
     util::{atomic_write, lock_path, stable_hash},
 };
 
@@ -59,19 +62,18 @@ pub(crate) fn write_package_info_cache(
     })?;
     let root_manifest: Value = serde_json::from_slice(&fs::read(&root_path)?)?;
 
-    let checkouts_dir = scratch_dir.join("checkouts");
-    let mut source_pins = resolved
+    let mut package_pins = resolved
         .pins
         .iter()
-        .filter(|pin| is_source_control_kind(&pin.kind))
+        .filter(|pin| is_source_control_kind(&pin.kind) || is_registry_kind(&pin.kind))
         .cloned()
         .collect::<Vec<_>>();
-    source_pins.sort_by(|left, right| left.identity.cmp(&right.identity));
+    package_pins.sort_by(|left, right| left.identity.cmp(&right.identity));
 
-    let mut packages = source_pins
+    let mut packages = package_pins
         .par_iter()
         .map(|pin| {
-            let package_path = checkouts_dir.join(checkout_directory_name(pin));
+            let package_path = package_path_for_pin(scratch_dir, pin)?;
             let package_info_path = cache_dir.join("packages").join(format!(
                 "{}-{}.json",
                 file_safe_identity(pin),
@@ -135,6 +137,18 @@ pub(crate) fn write_package_info_cache(
         println!("cached package manifest JSON into {}", cache_dir.display());
     }
     Ok(())
+}
+
+fn package_path_for_pin(scratch_dir: &Path, pin: &ResolvedPin) -> Result<PathBuf> {
+    if is_registry_kind(&pin.kind) {
+        Ok(scratch_dir
+            .join("registry/downloads")
+            .join(registry_download_subpath(pin)?))
+    } else {
+        Ok(scratch_dir
+            .join("checkouts")
+            .join(checkout_directory_name(pin)))
+    }
 }
 
 fn write_dump_package_json(

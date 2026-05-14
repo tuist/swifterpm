@@ -72,6 +72,29 @@ jobs:
       - name: Run tests
         run: cargo test --locked --all-targets
 
+  shellspec:
+    name: shellspec
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mise tools
+        uses: jdx/mise-action@v4.0.1
+        with:
+          version: ${{ env.MISE_VERSION }}
+          cache: true
+          install_args: rust shellspec jq
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: shellspec
+          cache-on-failure: true
+          cache-bin: true
+
+      - name: Run ShellSpec tests
+        run: mise run test:shellspec
+
   build:
     name: build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
