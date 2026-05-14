@@ -38,14 +38,19 @@ pub(crate) fn remote_versions(location: &str, cache: &Cache) -> Result<Vec<Remot
 }
 
 fn fetch_remote_versions(location: &str) -> Result<Vec<RemoteVersion>> {
-    if let Ok(github) = GitHubRepo::parse(location) {
-        if let Ok(versions) = github_remote_versions(&github) {
-            if !versions.is_empty() {
-                return Ok(versions);
-            }
+    // `git ls-remote --tags` returns every tag with its commit SHA in a single
+    // round trip. The GitHub tags API paginates (100 tags per page) and adds
+    // JSON parsing overhead, so we only fall back to it when ls-remote fails
+    // (e.g. SSH-only auth without git available).
+    if let Ok(versions) = git_remote_versions(location) {
+        if !versions.is_empty() {
+            return Ok(versions);
         }
     }
-    git_remote_versions(location)
+    if let Ok(github) = GitHubRepo::parse(location) {
+        return github_remote_versions(&github);
+    }
+    Ok(Vec::new())
 }
 
 fn read_cached_remote_versions(
