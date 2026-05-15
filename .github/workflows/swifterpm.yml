@@ -72,8 +72,8 @@ jobs:
       - name: Run tests
         run: cargo test --locked --all-targets
 
-  shellspec:
-    name: shellspec
+  e2e:
+    name: e2e
     runs-on: macos-15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -88,12 +88,12 @@ jobs:
       - name: Cache Rust
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
         with:
-          shared-key: shellspec
+          shared-key: e2e
           cache-on-failure: true
           cache-bin: true
 
-      - name: Run ShellSpec tests
-        run: mise run test:shellspec
+      - name: Run e2e tests
+        run: mise run test:e2e
 
   build:
     name: build (${{ matrix.os }})
