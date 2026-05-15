@@ -115,6 +115,149 @@ fn default_cache_root_from_env(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::resolved::{ResolvedPin, ResolvedState};
+
+    fn source_control_pin(identity: &str, version: Option<&str>, revision: &str) -> ResolvedPin {
+        ResolvedPin {
+            identity: identity.to_string(),
+            kind: "remoteSourceControl".to_string(),
+            location: format!("https://github.com/example/{identity}"),
+            state: ResolvedState {
+                branch: None,
+                revision: Some(revision.to_string()),
+                version: version.map(str::to_string),
+            },
+        }
+    }
+
+    fn branch_pin(identity: &str, branch: &str, revision: &str) -> ResolvedPin {
+        ResolvedPin {
+            identity: identity.to_string(),
+            kind: "remoteSourceControl".to_string(),
+            location: format!("https://github.com/example/{identity}"),
+            state: ResolvedState {
+                branch: Some(branch.to_string()),
+                revision: Some(revision.to_string()),
+                version: None,
+            },
+        }
+    }
+
+    fn registry_pin(identity: &str, version: &str) -> ResolvedPin {
+        ResolvedPin {
+            identity: identity.to_string(),
+            kind: "registry".to_string(),
+            location: String::new(),
+            state: ResolvedState {
+                branch: None,
+                revision: None,
+                version: Some(version.to_string()),
+            },
+        }
+    }
+
+    #[test]
+    fn source_path_for_versioned_pin_uses_version_and_short_revision() {
+        let cache = Cache {
+            root: PathBuf::from("/cache"),
+        };
+        let pin = source_control_pin("alamofire", Some("5.10.2"), "0123456789abcdef");
+
+        let path = cache.source_path(&pin).unwrap();
+
+        assert_eq!(
+            path,
+            PathBuf::from("/cache/sources/alamofire/5.10.2-0123456789ab")
+        );
+    }
+
+    #[test]
+    fn source_path_for_branch_pin_uses_branch_and_short_revision() {
+        let cache = Cache {
+            root: PathBuf::from("/cache"),
+        };
+        let pin = branch_pin("alamofire", "main", "fedcba9876543210");
+
+        let path = cache.source_path(&pin).unwrap();
+
+        assert_eq!(
+            path,
+            PathBuf::from("/cache/sources/alamofire/main-fedcba987654")
+        );
+    }
+
+    #[test]
+    fn source_path_for_registry_pin_uses_version_registry_suffix() {
+        let cache = Cache {
+            root: PathBuf::from("/cache"),
+        };
+        let pin = registry_pin("apple.swift-log", "1.6.4");
+
+        let path = cache.source_path(&pin).unwrap();
+
+        assert_eq!(
+            path,
+            PathBuf::from("/cache/sources/apple.swift-log/1.6.4-registry")
+        );
+    }
+
+    #[test]
+    fn archive_path_stably_hashes_url_and_shortens_revision() {
+        let cache = Cache {
+            root: PathBuf::from("/cache"),
+        };
+
+        let first = cache.archive_path("https://github.com/example/alamofire", "abcdef1234567890");
+        let second = cache.archive_path("https://github.com/example/alamofire", "abcdef1234567890");
+        let different =
+            cache.archive_path("https://github.com/example/different", "abcdef1234567890");
+
+        assert_eq!(first, second);
+        assert_ne!(first, different);
+        assert!(first.starts_with("/cache/archives"));
+        assert!(
+            first
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .ends_with("-abcdef123456.tar.gz")
+        );
+    }
+
+    #[test]
+    fn registry_archive_path_hashes_identity_and_keeps_full_version() {
+        let cache = Cache {
+            root: PathBuf::from("/cache"),
+        };
+
+        let path = cache.registry_archive_path("apple.swift-log", "1.6.4");
+
+        assert!(path.starts_with("/cache/registry/archives"));
+        assert!(
+            path.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .ends_with("-1.6.4.zip")
+        );
+    }
+
+    #[test]
+    fn metadata_paths_disambiguate_distinct_inputs() {
+        let cache = Cache {
+            root: PathBuf::from("/cache"),
+        };
+
+        let remote_a = cache.remote_versions_path("https://github.com/example/a");
+        let remote_b = cache.remote_versions_path("https://github.com/example/b");
+        let registry_a = cache.registry_versions_path("https://registry.example", "scope.a");
+        let registry_a_other_registry =
+            cache.registry_versions_path("https://other-registry.example", "scope.a");
+
+        assert!(remote_a.starts_with("/cache/metadata/remotes"));
+        assert!(registry_a.starts_with("/cache/metadata/registries"));
+        assert_ne!(remote_a, remote_b);
+        assert_ne!(registry_a, registry_a_other_registry);
+    }
 
     #[test]
     fn default_cache_root_uses_xdg_cache_home() {
