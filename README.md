@@ -15,6 +15,7 @@ Tuist generated projects gave us a clean contract to replace: package resolution
 
 ## How it works
 
+- **Swift + Bazel implementation**: The CLI is written in Swift, uses structured concurrency for parallel restoration and async HTTP downloads, and is built with Bazel through `rules_swift` plus the `rules_apple` macOS command-line application wrapper.
 - **Lockfile fast path**: When `Package.resolved` is available, `swifterpm` can use `--force-resolved-versions` to skip dependency solving and restore exactly the pinned revisions.
 - **GitHub archives first**: For GitHub dependencies, it downloads source tarballs for pinned revisions instead of cloning full repositories. A shallow Git fetch is kept as a fallback.
 - **Swift registry archives**: Registry packages declared with `.package(id:)` are resolved through SwiftPM-compatible registry configuration, downloaded as checksum-verified ZIP archives, and restored under `.build/registry/downloads`.
@@ -50,6 +51,52 @@ mise x github:tuist/swifterpm@latest -- swifterpm --package-path . --force-resol
 ```
 
 Useful SwiftPM-shaped flags are supported, including `--package-path`, `--cache-path`, `--scratch-path`, `--build-path`, `--config-path`, `--default-registry-url`, `--skip-update`, `--force-resolved-versions`, `--disable-automatic-resolution`, and `--only-use-versions-from-resolved-file`.
+
+## Bazel Swift package resolver
+
+`swifterpm` also ships a Bzlmod extension with the same resolver helper shape as `rules_swift_package_manager`:
+
+```starlark
+bazel_dep(name = "swifterpm", version = "0.1.0")
+
+swift_deps = use_extension("@swifterpm//:extensions.bzl", "swift_deps")
+swift_deps.from_package(
+    resolved = "//:Package.resolved",
+    swift = "//:Package.swift",
+)
+use_repo(swift_deps, "swift_package")
+```
+
+Then run:
+
+```sh
+bazel run @swift_package//:resolve
+bazel run @swift_package//:update
+```
+
+The generated `@swift_package` repository downloads the matching `swifterpm-${version}-${target}.tar.gz` binary from GitHub releases and uses it to update `Package.resolved`. For local rule development, override the tool with:
+
+```starlark
+swift_deps.configure_swifterpm(
+    local_binary = "/absolute/path/to/swifterpm",
+)
+```
+
+This currently covers the resolver helper API. It does not yet synthesize `swiftpkg_<identity>` Bazel build repositories for package targets.
+
+## Build from source
+
+Build the command-line binary:
+
+```sh
+mise exec -- bazel build //:swifterpm
+```
+
+Build the Apple rules wrapper:
+
+```sh
+mise exec -- bazel build //:swifterpm_macos
+```
 
 ## Benchmarks 📊
 
