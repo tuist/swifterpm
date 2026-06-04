@@ -108,16 +108,18 @@ The benchmark script is [mise/tasks/benchmark/resolution.sh](mise/tasks/benchmar
 Run it with:
 
 ```sh
-mise run benchmark:resolution -- --runs 3 --tuist-source ../tuist
+mise run benchmark:resolution -- --runs 3
 ```
 
-Latest single-run sample, generated on macOS 26.4.1 with Apple Swift 6.3.2:
+Add `--tuist-source ../tuist` to include a local Tuist checkout in the benchmark.
+
+Latest three-run sample, generated on macOS 26.4.1 with Apple Swift 6.3.2:
 
 | Codebase | Scenario | SwiftPM | swifterpm | Time reduction | Speedup |
 |:---|:---|---:|---:|---:|---:|
-| Pocket Casts iOS `Modules/Package.swift` | Cold | 225.498 s | 9.392 s | 95.83% | 24.01x |
-| Pocket Casts iOS `Modules/Package.swift` | Worktree-warm | 54.705 s | 0.014 s | 99.97% | 3989.37x |
-| Firefox iOS root `Package.swift` | Cold | 37.414 s | 1.203 s | 96.78% | 31.10x |
-| Firefox iOS root `Package.swift` | Worktree-warm | 4.439 s | 0.008 s | 99.82% | 522.78x |
+| Pocket Casts iOS `Modules/Package.swift` | Cold | 131.109 s | 31.800 s | 75.75% | 4.12x |
+| Pocket Casts iOS `Modules/Package.swift` | Worktree-warm | 70.924 s | 0.044 s | 99.94% | 1617.74x |
+| Firefox iOS root `Package.swift` | Cold | 13.865 s | 2.372 s | 82.89% | 5.84x |
+| Firefox iOS root `Package.swift` | Worktree-warm | 5.637 s | 0.040 s | 99.29% | 141.67x |
 
 Cold resolution removes package-local scratch directories and `swifterpm`'s cache before each run. Worktree-warm resolution removes package-local scratch directories before each run while keeping already-primed global caches, which models switching to another clean worktree.
