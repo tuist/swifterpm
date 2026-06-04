@@ -100,7 +100,7 @@ func resolveNamedRef(location: String, name: String) throws -> String {
     guard let line = output.split(separator: "\n").first,
           let revision = line.split(whereSeparator: \.isWhitespace).first
     else {
-        throw fail("\(name) was not found in \(location)")
+        throw ToolError.message("\(name) was not found in \(location)")
     }
     return String(revision)
 }

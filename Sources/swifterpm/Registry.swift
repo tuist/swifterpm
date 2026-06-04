@@ -27,7 +27,7 @@ struct RegistryConfig: Sendable {
         if let defaultRegistryURL {
             return defaultRegistryURL
         }
-        throw fail("no registry configured for '\(scope)' scope")
+        throw ToolError.message("no registry configured for '\(scope)' scope")
     }
 
     private mutating func mergeFile(_ path: URL) throws {
@@ -99,13 +99,13 @@ func downloadRegistryArchive(
             let data = try await fetchRegistryArchive(registryURL: registryURL, identity: identity, version: version)
             let actual = sha256Hex(data)
             guard actual.caseInsensitiveCompare(expectedChecksum) == .orderedSame else {
-                throw fail("\(identity) \(version) checksum mismatch: expected \(expectedChecksum), got \(actual)")
+                throw ToolError.message("\(identity) \(version) checksum mismatch: expected \(expectedChecksum), got \(actual)")
             }
             try atomicWrite(data, to: archivePath)
         }
     }
 
-    try runCommand("/usr/bin/unzip", ["-q", archivePath.path, "-d", destination.path])
+    try await runCommandAsync("/usr/bin/unzip", ["-q", archivePath.path, "-d", destination.path])
     try flattenSingleDirectory(destination)
 }
 
@@ -134,7 +134,7 @@ private func fetchSourceArchiveChecksum(registryURL: URL, identity: String, vers
     let data = try await httpData(url: try packageURL(registryURL: registryURL, identity: identity, version: version), headers: ["Accept": "application/vnd.swift.registry.v1+json"])
     let info = try JSONDecoder().decode(ReleaseInfo.self, from: data)
     guard let resource = info.resources.first(where: { $0.name == "source-archive" && $0.type == "application/zip" }) else {
-        throw fail("\(identity) \(version) does not declare a source archive checksum")
+        throw ToolError.message("\(identity) \(version) does not declare a source archive checksum")
     }
     return resource.checksum
 }
@@ -156,7 +156,7 @@ private func packageURL(registryURL: URL, identity: String, version: String? = n
 
 private func parseRegistryURL(_ url: String) throws -> URL {
     guard let parsed = URL(string: url), parsed.scheme == "https" else {
-        throw fail("registry URL must use https: \(url)")
+        throw ToolError.message("registry URL must use https: \(url)")
     }
     return parsed
 }

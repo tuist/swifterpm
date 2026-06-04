@@ -14,21 +14,41 @@ func restorePackage(
     try FileManager.default.createDirectory(at: checkouts, withIntermediateDirectories: true)
     try FileManager.default.createDirectory(at: registryDownloads, withIntermediateDirectories: true)
 
-    var sourcePins: [ResolvedPin] = []
-    var registryPins: [ResolvedPin] = []
-    var skipped = 0
-    for pin in resolved.pins {
-        if isSourceControlKind(pin.kind) {
-            sourcePins.append(pin)
-        } else if isRegistryKind(pin.kind) {
-            registryPins.append(pin)
-        } else {
-            skipped += 1
-        }
-    }
+    let sourcePins = resolved.pins.filter { isSourceControlKind($0.kind) }
+    let registryPins = resolved.pins.filter { isRegistryKind($0.kind) }
+    let skipped = resolved.pins.count - sourcePins.count - registryPins.count
 
-    let restoredSources = try await withThrowingTaskGroup(of: (String, URL).self) { group in
-        for pin in sourcePins {
+    async let restoredSources = restoreSourcePins(sourcePins, checkouts: checkouts, cache: cache)
+    async let restoredRegistry = restoreRegistryPins(
+        registryPins,
+        registryDownloads: registryDownloads,
+        cache: cache,
+        registryConfig: registryConfig
+    )
+
+    let (sourceResults, registryResults) = try await (restoredSources, restoredRegistry)
+
+    guard !quiet else { return }
+    for (identity, source) in sourceResults {
+        print("restored \(identity) -> \(source.path)")
+    }
+    for (identity, source) in registryResults {
+        print("restored \(identity) -> \(source.path)")
+    }
+    print("restored \(sourceResults.count) source-control packages into \(checkouts.path)")
+    print("restored \(registryResults.count) registry packages into \(registryDownloads.path)")
+    if skipped > 0 {
+        print("skipped \(skipped) unsupported pins")
+    }
+}
+
+private func restoreSourcePins(
+    _ pins: [ResolvedPin],
+    checkouts: URL,
+    cache: Cache
+) async throws -> [(String, URL)] {
+    try await withThrowingTaskGroup(of: (String, URL).self) { group in
+        for pin in pins {
             group.addTask {
                 let source = try await ensureSource(cache: cache, pin: pin)
                 let checkout = checkouts.appendingPathComponent(checkoutDirectoryName(pin))
@@ -36,15 +56,18 @@ func restorePackage(
                 return (pin.identity, source)
             }
         }
-        var results: [(String, URL)] = []
-        for try await result in group {
-            results.append(result)
-        }
-        return results.sorted { $0.0 < $1.0 }
+        return try await collectSortedTaskResults(group)
     }
+}
 
-    let restoredRegistry = try await withThrowingTaskGroup(of: (String, URL).self) { group in
-        for pin in registryPins {
+private func restoreRegistryPins(
+    _ pins: [ResolvedPin],
+    registryDownloads: URL,
+    cache: Cache,
+    registryConfig: RegistryConfig
+) async throws -> [(String, URL)] {
+    try await withThrowingTaskGroup(of: (String, URL).self) { group in
+        for pin in pins {
             group.addTask {
                 let source = try await ensureRegistrySource(cache: cache, registryConfig: registryConfig, pin: pin)
                 let download = registryDownloads.appendingPathComponent(try registryDownloadSubpath(pin))
@@ -52,25 +75,18 @@ func restorePackage(
                 return (pin.identity, source)
             }
         }
-        var results: [(String, URL)] = []
-        for try await result in group {
-            results.append(result)
-        }
-        return results.sorted { $0.0 < $1.0 }
+        return try await collectSortedTaskResults(group)
     }
+}
 
-    guard !quiet else { return }
-    for (identity, source) in restoredSources {
-        print("restored \(identity) -> \(source.path)")
+private func collectSortedTaskResults(
+    _ group: ThrowingTaskGroup<(String, URL), any Error>
+) async throws -> [(String, URL)] {
+    var results: [(String, URL)] = []
+    for try await result in group {
+        results.append(result)
     }
-    for (identity, source) in restoredRegistry {
-        print("restored \(identity) -> \(source.path)")
-    }
-    print("restored \(restoredSources.count) source-control packages into \(checkouts.path)")
-    print("restored \(restoredRegistry.count) registry packages into \(registryDownloads.path)")
-    if skipped > 0 {
-        print("skipped \(skipped) unsupported pins")
-    }
+    return results.sorted { $0.0 < $1.0 }
 }
 
 func ensureSource(cache: Cache, pin: ResolvedPin) async throws -> URL {
@@ -96,7 +112,7 @@ func ensureSource(cache: Cache, pin: ResolvedPin) async throws -> URL {
         try await downloadGitHubArchive(cache: cache, pin: pin, destination: temp)
     } catch {
         try resetDirectory(temp)
-        try shallowFetchCheckout(pin: pin, destination: temp)
+        try await shallowFetchCheckout(pin: pin, destination: temp)
     }
 
     do {
@@ -165,19 +181,19 @@ private func downloadGitHubArchive(cache: Cache, pin: ResolvedPin, destination: 
         }
     }
 
-    try runCommand("/usr/bin/tar", ["-xzf", archivePath.path, "-C", destination.path])
+    try await runCommandAsync("/usr/bin/tar", ["-xzf", archivePath.path, "-C", destination.path])
     try flattenSingleDirectory(destination)
     try rejectArchiveWithSubmodules(destination)
 }
 
-private func shallowFetchCheckout(pin: ResolvedPin, destination: URL) throws {
+private func shallowFetchCheckout(pin: ResolvedPin, destination: URL) async throws {
     let revision = try pin.revision()
     try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
-    try runCommand("/usr/bin/git", ["init", destination.path])
-    try runCommand("/usr/bin/git", ["-C", destination.path, "remote", "add", "origin", pin.location])
-    try runCommand("/usr/bin/git", ["-C", destination.path, "fetch", "--depth=1", "origin", revision])
-    try runCommand("/usr/bin/git", ["-C", destination.path, "checkout", "--detach", "FETCH_HEAD"])
-    try runCommand("/usr/bin/git", ["-C", destination.path, "submodule", "update", "--init", "--recursive"])
+    try await runCommandAsync("/usr/bin/git", ["init", destination.path])
+    try await runCommandAsync("/usr/bin/git", ["-C", destination.path, "remote", "add", "origin", pin.location])
+    try await runCommandAsync("/usr/bin/git", ["-C", destination.path, "fetch", "--depth=1", "origin", revision])
+    try await runCommandAsync("/usr/bin/git", ["-C", destination.path, "checkout", "--detach", "FETCH_HEAD"])
+    try await runCommandAsync("/usr/bin/git", ["-C", destination.path, "submodule", "update", "--init", "--recursive"])
     let gitDir = destination.appendingPathComponent(".git")
     if localSourceControlPackageLocation(pin.location) == nil,
        FileManager.default.fileExists(atPath: gitDir.path)
@@ -188,7 +204,7 @@ private func shallowFetchCheckout(pin: ResolvedPin, destination: URL) throws {
 
 private func rejectArchiveWithSubmodules(_ destination: URL) throws {
     if FileManager.default.fileExists(atPath: destination.appendingPathComponent(".gitmodules").path) {
-        throw fail("\(destination.path) declares git submodules, which GitHub source archives do not include")
+        throw ToolError.message("\(destination.path) declares git submodules, which GitHub source archives do not include")
     }
 }
 

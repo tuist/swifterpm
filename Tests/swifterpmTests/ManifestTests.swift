@@ -1,0 +1,153 @@
+import Testing
+
+struct ManifestTests {
+    @Test
+    func parseManifestDependenciesReadsSourceControlAndRegistryDependencies() throws {
+        let manifest: [String: Any] = [
+            "dependencies": [
+                [
+                    "sourceControl": [
+                        [
+                            "identity": "Foo",
+                            "location": [
+                                "remote": [
+                                    ["urlString": "https://github.com/example/foo.git"],
+                                ],
+                            ],
+                            "requirement": [
+                                "range": [
+                                    [
+                                        "lowerBound": "1.0.0",
+                                        "upperBound": "2.0.0",
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+                [
+                    "registry": [
+                        [
+                            "identity": "example.bar",
+                            "requirement": [
+                                "exact": ["3.4.5"],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ]
+
+        let dependencies = try parseManifestDependencies(manifest)
+
+        #expect(dependencies.count == 2)
+        #expect(dependencies[0].identity == "Foo")
+        #expect(dependencies[0].kind == .sourceControl)
+        #expect(dependencies[0].location == "https://github.com/example/foo.git")
+        guard case let .range(lower, upper) = dependencies[0].requirement else {
+            Issue.record("expected range requirement")
+            return
+        }
+        #expect(lower.description == "1.0.0")
+        #expect(upper.description == "2.0.0")
+
+        #expect(dependencies[1].identity == "example.bar")
+        #expect(dependencies[1].kind == .registry)
+        guard case let .exact(version) = dependencies[1].requirement else {
+            Issue.record("expected exact requirement")
+            return
+        }
+        #expect(version.description == "3.4.5")
+    }
+
+    @Test
+    func parseRequiredManifestDependenciesKeepsOnlyReachableDependencies() throws {
+        let manifest: [String: Any] = [
+            "products": [
+                [
+                    "name": "App",
+                    "targets": ["App"],
+                ],
+            ],
+            "targets": [
+                [
+                    "name": "App",
+                    "dependencies": [
+                        ["product": ["FooProduct", "Foo"]],
+                    ],
+                ],
+            ],
+            "dependencies": [
+                [
+                    "sourceControl": [
+                        sourceDependency(identity: "Foo"),
+                        sourceDependency(identity: "Unused"),
+                    ],
+                ],
+            ],
+        ]
+
+        let dependencies = try parseRequiredManifestDependencies(manifest)
+
+        #expect(dependencies.map(\.identity) == ["Foo"])
+    }
+
+    @Test
+    func parseManifestFileSystemDependenciesUsesFallbackName() throws {
+        let manifest: [String: Any] = [
+            "dependencies": [
+                [
+                    "fileSystem": [
+                        [
+                            "identity": "local-dependency",
+                            "path": "../LocalDependency",
+                        ],
+                        [
+                            "identity": "named-dependency",
+                            "nameForTargetDependencyResolutionOnly": "Named",
+                            "path": "../Named",
+                        ],
+                    ],
+                ],
+            ],
+        ]
+
+        let dependencies = try parseManifestFileSystemDependencies(manifest)
+
+        #expect(dependencies.count == 2)
+        #expect(dependencies[0].identity == "local-dependency")
+        #expect(dependencies[0].name == "local-dependency")
+        #expect(dependencies[1].identity == "named-dependency")
+        #expect(dependencies[1].name == "Named")
+    }
+
+    @Test
+    func versionRangeMatchesExactAndOpenRanges() throws {
+        let exact = try #require(versionRange(for: .exact(SemVer("1.2.3"))))
+        #expect(try exact.contains(SemVer("1.2.3")))
+        #expect(try !exact.contains(SemVer("1.2.4")))
+
+        let range = try #require(versionRange(for: .range(lower: SemVer("1.0.0"), upper: SemVer("2.0.0"))))
+        #expect(try range.contains(SemVer("1.5.0")))
+        #expect(try !range.contains(SemVer("2.0.0")))
+    }
+
+    private func sourceDependency(identity: String) -> [String: Any] {
+        [
+            "identity": identity,
+            "location": [
+                "remote": [
+                    ["urlString": "https://github.com/example/\(identity).git"],
+                ],
+            ],
+            "requirement": [
+                "range": [
+                    [
+                        "lowerBound": "1.0.0",
+                        "upperBound": "2.0.0",
+                    ],
+                ],
+            ],
+        ]
+    }
+}

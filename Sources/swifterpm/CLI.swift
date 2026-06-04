@@ -1,4 +1,7 @@
+import ArgumentParser
 import Foundation
+
+let swifterpmVersion = "0.1.0"
 
 struct CLI {
     var chdir: URL?
@@ -58,189 +61,237 @@ struct CLI {
     }
 }
 
+enum CLIAction: String, ExpressibleByArgument {
+    case resolve
+    case update
+    case restore
+}
+
+struct SwifterPMCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "swifterpm",
+        abstract: "Resolve and restore Swift package dependencies.",
+        version: swifterpmVersion
+    )
+
+    @Option(name: .customLong("chdir"))
+    var chdir: String?
+
+    @Option(name: .customLong("package-path"))
+    var packagePath: String?
+
+    @Option(name: .customLong("cache-path"))
+    var cachePath: String?
+
+    @Option(name: .customLong("scratch-path"))
+    var scratchPath: String?
+
+    @Option(name: .customLong("build-path"))
+    var buildPath: String?
+
+    @Option(name: .customLong("config-path"))
+    var configPath: String?
+
+    @Option(name: .customLong("security-path"))
+    var securityPath: String?
+
+    @Flag(name: .customLong("disable-sandbox"))
+    var disableSandbox = false
+
+    @Flag(name: .customLong("enable-dependency-cache"))
+    var enableDependencyCache = false
+
+    @Flag(name: .customLong("disable-dependency-cache"))
+    var disableDependencyCache = false
+
+    @Flag(name: .customLong("skip-update"))
+    var skipUpdate = false
+
+    @Flag(name: .customLong("force-resolved-versions"))
+    var forceResolvedVersions = false
+
+    @Flag(name: .customLong("disable-automatic-resolution"))
+    var disableAutomaticResolution = false
+
+    @Flag(name: .customLong("only-use-versions-from-resolved-file"))
+    var onlyUseVersionsFromResolvedFile = false
+
+    @Flag(name: .customLong("replace-scm-with-registry"))
+    var replaceSCMWithRegistry = false
+
+    @Flag(name: .customLong("use-registry-identity-for-scm"))
+    var useRegistryIdentityForSCM = false
+
+    @Option(name: .customLong("default-registry-url"))
+    var defaultRegistryURL: String?
+
+    @Flag(name: .customLong("disable-scm-to-registry-transformation"))
+    var disableSCMToRegistryTransformation = false
+
+    @Flag(name: [.customShort("q"), .customLong("quiet")])
+    var quiet = false
+
+    @Flag(name: .customLong("disable-package-info-cache"))
+    var disablePackageInfoCache = false
+
+    @Option(name: .customLong("package-info-cache-path"))
+    var packageInfoCachePath: String?
+
+    @Argument
+    var action: CLIAction
+
+    @Argument(parsing: .allUnrecognized)
+    var commandArguments: [String] = []
+
+    mutating func run() async throws {
+        try await runAsync()
+    }
+
+    mutating func runAsync() async throws {
+        try await runCLI(try makeCLI())
+    }
+
+    func makeCLI() throws -> CLI {
+        let command: CLI.Command
+        switch action {
+        case .resolve:
+            command = .resolve(try ResolveArguments.parse(commandArguments).makeOptions())
+        case .update:
+            command = .update(try UpdateArguments.parse(commandArguments).makeOptions())
+        case .restore:
+            command = .restore(try RestoreArguments.parse(commandArguments).makeOptions())
+        }
+
+        return CLI(
+            chdir: fileURL(chdir),
+            packagePath: fileURL(packagePath),
+            cachePath: fileURL(cachePath),
+            scratchPath: fileURL(scratchPath),
+            buildPath: fileURL(buildPath),
+            configPath: fileURL(configPath),
+            securityPath: fileURL(securityPath),
+            disableSandbox: disableSandbox,
+            enableDependencyCache: enableDependencyCache,
+            disableDependencyCache: disableDependencyCache,
+            skipUpdate: skipUpdate,
+            forceResolvedVersions: forceResolvedVersions,
+            disableAutomaticResolution: disableAutomaticResolution,
+            onlyUseVersionsFromResolvedFile: onlyUseVersionsFromResolvedFile,
+            replaceSCMWithRegistry: replaceSCMWithRegistry,
+            useRegistryIdentityForSCM: useRegistryIdentityForSCM,
+            defaultRegistryURL: defaultRegistryURL,
+            disableSCMToRegistryTransformation: disableSCMToRegistryTransformation,
+            quiet: quiet,
+            disablePackageInfoCache: disablePackageInfoCache,
+            packageInfoCachePath: fileURL(packageInfoCachePath),
+            command: command
+        )
+    }
+}
+
 func parseCLI(_ args: [String]) throws -> CLI {
-    var index = 0
-    var cli = CLI(command: .resolve(.init()))
-
-    func requireValue(_ flag: String) throws -> String {
-        guard index + 1 < args.count else {
-            throw fail("\(flag) requires a value")
-        }
-        index += 1
-        return args[index]
-    }
-
-    while index < args.count {
-        let arg = args[index]
-        if !arg.hasPrefix("-") {
-            break
-        }
-        switch arg {
-        case "--chdir":
-            cli.chdir = URL(fileURLWithPath: try requireValue(arg))
-        case "--package-path":
-            cli.packagePath = URL(fileURLWithPath: try requireValue(arg))
-        case "--cache-path":
-            cli.cachePath = URL(fileURLWithPath: try requireValue(arg))
-        case "--scratch-path":
-            cli.scratchPath = URL(fileURLWithPath: try requireValue(arg))
-        case "--build-path":
-            cli.buildPath = URL(fileURLWithPath: try requireValue(arg))
-        case "--config-path":
-            cli.configPath = URL(fileURLWithPath: try requireValue(arg))
-        case "--security-path":
-            cli.securityPath = URL(fileURLWithPath: try requireValue(arg))
-        case "--disable-sandbox":
-            cli.disableSandbox = true
-        case "--enable-dependency-cache":
-            cli.enableDependencyCache = true
-        case "--disable-dependency-cache":
-            cli.disableDependencyCache = true
-        case "--skip-update":
-            cli.skipUpdate = true
-        case "--force-resolved-versions":
-            cli.forceResolvedVersions = true
-        case "--disable-automatic-resolution":
-            cli.disableAutomaticResolution = true
-        case "--only-use-versions-from-resolved-file":
-            cli.onlyUseVersionsFromResolvedFile = true
-        case "--replace-scm-with-registry":
-            cli.replaceSCMWithRegistry = true
-        case "--use-registry-identity-for-scm":
-            cli.useRegistryIdentityForSCM = true
-        case "--default-registry-url":
-            cli.defaultRegistryURL = try requireValue(arg)
-        case "--disable-scm-to-registry-transformation":
-            cli.disableSCMToRegistryTransformation = true
-        case "--quiet", "-q":
-            cli.quiet = true
-        case "--disable-package-info-cache":
-            cli.disablePackageInfoCache = true
-        case "--package-info-cache-path":
-            cli.packageInfoCachePath = URL(fileURLWithPath: try requireValue(arg))
-        default:
-            throw fail("unknown argument: \(arg)")
-        }
-        index += 1
-    }
-
-    guard index < args.count else {
-        throw fail("missing command")
-    }
-
-    let command = args[index]
-    index += 1
-    switch command {
-    case "resolve":
-        cli.command = .resolve(try parseResolveOptions(Array(args[index...])))
-    case "update":
-        cli.command = .update(try parseUpdateOptions(Array(args[index...])))
-    case "restore":
-        cli.command = .restore(try parseRestoreOptions(Array(args[index...])))
-    default:
-        throw fail("unknown command: \(command)")
-    }
-
-    return cli
+    try SwifterPMCommand.parse(args).makeCLI()
 }
 
-private func parseResolveOptions(_ args: [String]) throws -> CLI.ResolveOptions {
-    var options = CLI.ResolveOptions()
-    var index = 0
-    func requireValue(_ flag: String) throws -> String {
-        guard index + 1 < args.count else { throw fail("\(flag) requires a value") }
-        index += 1
-        return args[index]
+private struct ResolveArguments: ParsableArguments {
+    @Argument
+    var packageName: String?
+
+    @Option(name: .customLong("version"))
+    var version: String?
+
+    @Option(name: .customLong("branch"))
+    var branch: String?
+
+    @Option(name: .customLong("revision"))
+    var revision: String?
+
+    @Option(name: .customLong("package-dir"))
+    var packageDir = "."
+
+    @Option(name: .customLong("cache-dir"))
+    var cacheDir: String?
+
+    @Flag(name: .customLong("write"))
+    var write = false
+
+    @Flag(name: .customLong("restore"))
+    var restore = false
+
+    @Flag(name: .customLong("print-only"))
+    var printOnly = false
+
+    func makeOptions() -> CLI.ResolveOptions {
+        CLI.ResolveOptions(
+            packageName: packageName,
+            version: version,
+            branch: branch,
+            revision: revision,
+            packageDir: fileURL(packageDir),
+            cacheDir: fileURL(cacheDir),
+            write: write,
+            restore: restore,
+            printOnly: printOnly
+        )
     }
-    while index < args.count {
-        let arg = args[index]
-        switch arg {
-        case "--version":
-            options.version = try requireValue(arg)
-        case "--branch":
-            options.branch = try requireValue(arg)
-        case "--revision":
-            options.revision = try requireValue(arg)
-        case "--package-dir":
-            options.packageDir = URL(fileURLWithPath: try requireValue(arg))
-        case "--cache-dir":
-            options.cacheDir = URL(fileURLWithPath: try requireValue(arg))
-        case "--write":
-            options.write = true
-        case "--restore":
-            options.restore = true
-        case "--print-only":
-            options.printOnly = true
-        default:
-            if arg.hasPrefix("-") {
-                throw fail("unknown argument: \(arg)")
-            }
-            if options.packageName == nil {
-                options.packageName = arg
-            } else {
-                throw fail("unexpected argument: \(arg)")
-            }
-        }
-        index += 1
-    }
-    return options
 }
 
-private func parseUpdateOptions(_ args: [String]) throws -> CLI.UpdateOptions {
-    var options = CLI.UpdateOptions()
-    var index = 0
-    func requireValue(_ flag: String) throws -> String {
-        guard index + 1 < args.count else { throw fail("\(flag) requires a value") }
-        index += 1
-        return args[index]
+private struct UpdateArguments: ParsableArguments {
+    @Argument
+    var packageNames: [String] = []
+
+    @Option(name: .customLong("package-dir"))
+    var packageDir = "."
+
+    @Option(name: .customLong("cache-dir"))
+    var cacheDir: String?
+
+    @Flag(name: .customLong("write"))
+    var write = false
+
+    @Flag(name: .customLong("restore"))
+    var restore = false
+
+    @Flag(name: .customLong("print-only"))
+    var printOnly = false
+
+    func makeOptions() -> CLI.UpdateOptions {
+        CLI.UpdateOptions(
+            packageNames: packageNames,
+            packageDir: fileURL(packageDir),
+            cacheDir: fileURL(cacheDir),
+            write: write,
+            restore: restore,
+            printOnly: printOnly
+        )
     }
-    while index < args.count {
-        let arg = args[index]
-        switch arg {
-        case "--package-dir":
-            options.packageDir = URL(fileURLWithPath: try requireValue(arg))
-        case "--cache-dir":
-            options.cacheDir = URL(fileURLWithPath: try requireValue(arg))
-        case "--write":
-            options.write = true
-        case "--restore":
-            options.restore = true
-        case "--print-only":
-            options.printOnly = true
-        default:
-            if arg.hasPrefix("-") {
-                throw fail("unknown argument: \(arg)")
-            }
-            options.packageNames.append(arg)
-        }
-        index += 1
-    }
-    return options
 }
 
-private func parseRestoreOptions(_ args: [String]) throws -> CLI.RestoreOptions {
-    var options = CLI.RestoreOptions()
-    var index = 0
-    func requireValue(_ flag: String) throws -> String {
-        guard index + 1 < args.count else { throw fail("\(flag) requires a value") }
-        index += 1
-        return args[index]
+private struct RestoreArguments: ParsableArguments {
+    @Option(name: .customLong("package-dir"))
+    var packageDir = "."
+
+    @Option(name: .customLong("cache-dir"))
+    var cacheDir: String?
+
+    @Option(name: .customLong("scratch-dir"))
+    var scratchDir: String?
+
+    func makeOptions() -> CLI.RestoreOptions {
+        CLI.RestoreOptions(
+            packageDir: fileURL(packageDir),
+            cacheDir: fileURL(cacheDir),
+            scratchDir: fileURL(scratchDir)
+        )
     }
-    while index < args.count {
-        let arg = args[index]
-        switch arg {
-        case "--package-dir":
-            options.packageDir = URL(fileURLWithPath: try requireValue(arg))
-        case "--cache-dir":
-            options.cacheDir = URL(fileURLWithPath: try requireValue(arg))
-        case "--scratch-dir":
-            options.scratchDir = URL(fileURLWithPath: try requireValue(arg))
-        default:
-            throw fail("unknown argument: \(arg)")
-        }
-        index += 1
-    }
-    return options
+}
+
+private func fileURL(_ path: String?) -> URL? {
+    path.map(fileURL)
+}
+
+private func fileURL(_ path: String) -> URL {
+    URL(fileURLWithPath: path)
 }
 
 func runCLI(_ cli: CLI) async throws {
@@ -266,7 +317,7 @@ func runCLI(_ cli: CLI) async throws {
         )
     case let .update(options):
         if !options.packageNames.isEmpty {
-            throw fail("package-specific update is not supported yet")
+            throw ToolError.message("package-specific update is not supported yet")
         }
         try await runResolutionCommand(
             cli: cli,
@@ -339,7 +390,7 @@ private func maybeWritePackageInfoCache(cli: CLI, package: URL, scratch: URL, re
 
 private func ensureWholePackageResolution(packageName: String?, version: String?, branch: String?, revision: String?) throws {
     if packageName != nil || version != nil || branch != nil || revision != nil {
-        throw fail("package-specific resolve is not supported yet")
+        throw ToolError.message("package-specific resolve is not supported yet")
     }
 }
 
