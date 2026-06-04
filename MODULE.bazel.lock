@@ -657,7 +657,7 @@
         "bzlTransitiveDigest": "gKtWD1CS4Sqn+lQH91Cimr4D3cJN0MkrzkFJPkoIVMU=",
         "usagesDigest": "NF6WnTzFDZ2rp4u8sdsTVDk3sdyGmczzb6FZ6Rwqfuw=",
         "recordedFileInputs": {
-          "@@//third_party/nio/Package.resolved": "71e1c04cf71892e5b31e927a7d3eb0d55e7da4e3d6566433e0dff69fed521f59"
+          "@@//third_party/nio/Package.resolved": "6cf15c3b15b6b5e8b72183ed89873a205ced4cabb392cebbaa30d3d7772e7c8b"
         },
         "recordedDirentsInputs": {},
         "envVariables": {},
@@ -690,9 +690,9 @@
             "repoRuleId": "@@rules_swift_package_manager+//swiftpkg/internal:swift_package.bzl%swift_package",
             "attributes": {
               "bazel_package_name": "swiftpkg_swift_subprocess",
-              "commit": "11633673a41f509f8945f23c96c7acd4adafd679",
+              "commit": "13d087685b95d64d6aac9b94500d347bbe84c39b",
               "remote": "https://github.com/swiftlang/swift-subprocess.git",
-              "version": "0.5.0",
+              "version": "0.4.0",
               "env": {},
               "env_inherit": [],
               "cached_json_directory": "",
