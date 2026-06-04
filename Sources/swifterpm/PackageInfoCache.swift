@@ -57,10 +57,10 @@ enum PackageInfoCacheWriter {
         )
 
         let rootPath = cacheDir.appendingPathComponent("root.json")
-        try await writeDumpPackageJSON(
+        let rootManifestData = try await cachedOrDumpPackageJSON(
             packageDir: packageDir, destination: rootPath, disableSandbox: disableSandbox)
         let rootManifest = try JSONSerialization.jsonObject(
-            with: try await AsyncFileSystem.readData(from: rootPath))
+            with: rootManifestData)
 
         let packagePins = resolved.pins
             .filter { PinKind.isSourceControl($0.kind) || PinKind.isRegistry($0.kind) }
@@ -75,7 +75,7 @@ enum PackageInfoCacheWriter {
                         .appendingPathComponent("packages")
                         .appendingPathComponent(
                             "\(SafeFileName.make(pin.identity))-\(entryHash(pin)).json")
-                    try await writeDumpPackageJSON(
+                    _ = try await cachedOrDumpPackageJSON(
                         packageDir: packagePath, destination: packageInfoPath,
                         disableSandbox: disableSandbox)
                     return packageEntry(
@@ -100,7 +100,7 @@ enum PackageInfoCacheWriter {
                 .appendingPathComponent(
                     "\(SafeFileName.make(dependency.identity))-\(String(Hashing.stable(dependency.path).prefix(16))).json"
                 )
-            try await writeDumpPackageJSON(
+            _ = try await cachedOrDumpPackageJSON(
                 packageDir: packagePath, destination: packageInfoPath,
                 disableSandbox: disableSandbox)
             allPackages.append(
@@ -154,14 +154,27 @@ enum PackageInfoCacheWriter {
             .appendingPathComponent(PinKind.checkoutDirectoryName(pin))
     }
 
-    private static func writeDumpPackageJSON(
+    private static func cachedOrDumpPackageJSON(
         packageDir: URL, destination: URL, disableSandbox: Bool
-    )
-        async throws
-    {
+    ) async throws -> Data {
+        if try await isFreshPackageInfo(destination: destination, packageDir: packageDir) {
+            return try await AsyncFileSystem.readData(from: destination)
+        }
         let data = try await ManifestLoader.dumpPackageJSON(
             packageDir: packageDir, disableSandbox: disableSandbox)
         try await AsyncFileSystem.atomicWrite(data, to: destination)
+        return data
+    }
+
+    private static func isFreshPackageInfo(destination: URL, packageDir: URL) async throws -> Bool {
+        guard
+            let cacheDate = try await AsyncFileSystem.modificationDate(destination),
+            let manifestDate = try await AsyncFileSystem.modificationDate(
+                packageDir.appendingPathComponent("Package.swift"))
+        else {
+            return false
+        }
+        return cacheDate >= manifestDate
     }
 
     private static func packageEntry(pin: ResolvedPin, packagePath: URL, packageInfoPath: URL)
