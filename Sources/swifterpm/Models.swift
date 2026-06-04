@@ -33,53 +33,64 @@ struct ResolvedState: Codable, Equatable, Sendable {
     var version: String?
 }
 
-func readResolvedFile(packageDir: URL) async throws -> ResolvedPins {
-    let data = try await AsyncFileSystem.readData(from: packageDir.appendingPathComponent("Package.resolved"))
-    return try JSONDecoder().decode(ResolvedPins.self, from: data)
-}
+enum ResolvedFile {
+    static func read(packageDir: URL) async throws -> ResolvedPins {
+        let data = try await AsyncFileSystem.readData(
+            from: packageDir.appendingPathComponent("Package.resolved"))
+        return try JSONDecoder().decode(ResolvedPins.self, from: data)
+    }
 
-func writeResolvedFile(packageDir: URL, resolved: ResolvedPins) async throws {
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-    let data = try encoder.encode(resolved) + Data("\n".utf8)
-    try await atomicWrite(data, to: packageDir.appendingPathComponent("Package.resolved"))
-}
+    static func write(packageDir: URL, resolved: ResolvedPins) async throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(resolved) + Data("\n".utf8)
+        try await AsyncFileSystem.atomicWrite(
+            data, to: packageDir.appendingPathComponent("Package.resolved"))
+    }
 
-func printResolution(_ resolved: ResolvedPins) {
-    for pin in resolved.pins {
-        if isRegistryKind(pin.kind) {
-            print("\(pin.identity) \(pin.state.version ?? "<unknown>") registry")
-        } else if let version = pin.state.version {
-            print("\(pin.identity) \(version) \(pin.state.revision ?? "<unknown>") \(pin.location)")
-        } else {
-            print("\(pin.identity) \(pin.state.revision ?? "<unknown>") \(pin.location)")
+    static func print(_ resolved: ResolvedPins) {
+        for pin in resolved.pins {
+            if PinKind.isRegistry(pin.kind) {
+                Swift.print("\(pin.identity) \(pin.state.version ?? "<unknown>") registry")
+            } else if let version = pin.state.version {
+                Swift.print(
+                    "\(pin.identity) \(version) \(pin.state.revision ?? "<unknown>") \(pin.location)"
+                )
+            } else {
+                Swift.print("\(pin.identity) \(pin.state.revision ?? "<unknown>") \(pin.location)")
+            }
         }
     }
 }
 
-func isSourceControlKind(_ kind: String) -> Bool {
-    kind == "remoteSourceControl" || kind == "localSourceControl" || kind == "sourceControl"
-}
-
-func isRegistryKind(_ kind: String) -> Bool {
-    kind == "registry"
-}
-
-func checkoutDirectoryName(_ pin: ResolvedPin) -> String {
-    let trimmed = pin.location.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-    let withoutGit = trimmed.hasSuffix(".git") ? String(trimmed.dropLast(4)) : trimmed
-    return withoutGit.split(separator: "/").last.map(String.init).flatMap { $0.isEmpty ? nil : $0 } ?? pin.identity
-}
-
-func registryIdentityParts(_ identity: String) throws -> (String, String) {
-    let parts = identity.split(separator: ".", maxSplits: 1).map(String.init)
-    guard parts.count == 2 else {
-        throw ToolError.message("\(identity) is not a scoped registry package identity")
+enum PinKind {
+    static func isSourceControl(_ kind: String) -> Bool {
+        kind == "remoteSourceControl" || kind == "localSourceControl" || kind == "sourceControl"
     }
-    return (parts[0], parts[1])
-}
 
-func registryDownloadSubpath(_ pin: ResolvedPin) throws -> String {
-    let (scope, name) = try registryIdentityParts(pin.identity)
-    return "\(scope)/\(name)/\(try pin.versionString())"
+    static func isRegistry(_ kind: String) -> Bool {
+        kind == "registry"
+    }
+
+    static func checkoutDirectoryName(_ pin: ResolvedPin) -> String {
+        let trimmed = pin.location.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let withoutGit = trimmed.hasSuffix(".git") ? String(trimmed.dropLast(4)) : trimmed
+        return withoutGit.split(separator: "/").last.map(String.init).flatMap {
+            $0.isEmpty ? nil : $0
+        }
+            ?? pin.identity
+    }
+
+    static func registryIdentityParts(_ identity: String) throws -> (String, String) {
+        let parts = identity.split(separator: ".", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else {
+            throw ToolError.message("\(identity) is not a scoped registry package identity")
+        }
+        return (parts[0], parts[1])
+    }
+
+    static func registryDownloadSubpath(_ pin: ResolvedPin) throws -> String {
+        let (scope, name) = try PinKind.registryIdentityParts(pin.identity)
+        return "\(scope)/\(name)/\(try pin.versionString())"
+    }
 }

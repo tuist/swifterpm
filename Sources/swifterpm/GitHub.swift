@@ -5,7 +5,8 @@ struct GitHubRepo: Sendable {
     let repo: String
 
     init(location: String) throws {
-        let normalized = location.hasPrefix("git@github.com:")
+        let normalized =
+            location.hasPrefix("git@github.com:")
             ? location.replacingOccurrences(of: "git@github.com:", with: "https://github.com/")
             : location
         guard let url = URL(string: normalized), url.host == "github.com" else {
@@ -32,13 +33,14 @@ private actor GitHubTokenCache {
 
         let env = ProcessInfo.processInfo.environment
         if let token = env["GITHUB_TOKEN"] ?? env["GH_TOKEN"],
-           !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         {
             cachedToken = token
             return token
         }
 
-        guard let output = try? await commandOutputAsync("/usr/bin/env", ["gh", "auth", "token"]) else {
+        guard let output = try? await SystemProcess.output("/usr/bin/env", ["gh", "auth", "token"])
+        else {
             return nil
         }
         let token = output.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -49,21 +51,39 @@ private actor GitHubTokenCache {
 
 private let githubTokenCache = GitHubTokenCache()
 
-func githubToken() async -> String? {
-    await githubTokenCache.token()
+enum GitHubAuth {
+    static func token() async -> String? {
+        await githubTokenCache.token()
+    }
+
+    static func hasSession() async -> Bool {
+        await token() != nil
+    }
 }
 
-func hasGitHubSession() async -> Bool {
-    await githubToken() != nil
-}
+enum SourceControlLocations {
+    static func fetchCandidates(_ location: String) -> [String] {
+        var locations = [location]
+        appendGitHubSSHLocation(for: location, to: &locations)
+        appendGitLabSSHLocation(for: location, to: &locations)
+        return locations
+    }
 
-func sourceControlFetchLocations(_ location: String) -> [String] {
-    var locations = [location]
-    if let repo = try? GitHubRepo(location: location) {
+    private static func appendGitHubSSHLocation(for location: String, to locations: inout [String])
+    {
+        guard let repo = try? GitHubRepo(location: location) else { return }
         let ssh = "git@github.com:\(repo.owner)/\(repo.repo).git"
         if !locations.contains(ssh) {
             locations.append(ssh)
         }
     }
-    return locations
+
+    private static func appendGitLabSSHLocation(for location: String, to locations: inout [String])
+    {
+        guard let repo = try? GitLabRepo(location: location) else { return }
+        let ssh = "git@\(repo.host):\(repo.pathWithNamespace).git"
+        if !locations.contains(ssh) {
+            locations.append(ssh)
+        }
+    }
 }

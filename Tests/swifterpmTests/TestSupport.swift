@@ -21,30 +21,37 @@ func withTemporaryDirectory<T>(_ body: (URL) async throws -> T) async throws -> 
 
 func writeCachedManifest(_ manifest: [String: Any], packageDir: URL) async throws {
     try await AsyncFileSystem.createDirectory(at: packageDir, withIntermediateDirectories: true)
-    try await atomicWrite(
+    try await AsyncFileSystem.atomicWrite(
         """
-    // swift-tools-version: 6.0
-    import PackageDescription
+        // swift-tools-version: 6.0
+        import PackageDescription
 
-    let package = Package(name: "Fixture")
-    """,
+        let package = Package(name: "Fixture")
+        """,
         to: packageDir.appendingPathComponent("Package.swift")
     )
-    try await atomicWrite(try prettyJSONData(manifest), to: packageDir.appendingPathComponent(manifestCacheFile))
+    try await AsyncFileSystem.atomicWrite(
+        try JSONFormatter.prettyData(manifest),
+        to: packageDir.appendingPathComponent(ManifestLoader.cacheFile))
 }
 
 func fixtureURL(_ components: String...) async throws -> URL {
+    try await fixtureURL(components)
+}
+
+func fixtureURL(_ components: [String]) async throws -> URL {
     let relative = ["Tests", "swifterpmTests", "Fixtures"] + components
     let env = ProcessInfo.processInfo.environment
     var candidates = [
         URL(fileURLWithPath: try await AsyncFileSystem.currentDirectoryPath())
-            .appendingPathComponents(relative),
+            .appendingPathComponents(relative)
     ]
 
     if let testSrcDir = env["TEST_SRCDIR"] {
         let srcDir = URL(fileURLWithPath: testSrcDir)
         if let workspace = env["TEST_WORKSPACE"] {
-            candidates.append(srcDir.appendingPathComponent(workspace).appendingPathComponents(relative))
+            candidates.append(
+                srcDir.appendingPathComponent(workspace).appendingPathComponents(relative))
         }
         candidates.append(srcDir.appendingPathComponents(relative))
         candidates.append(srcDir.appendingPathComponent("_main").appendingPathComponents(relative))

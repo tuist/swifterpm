@@ -18,13 +18,13 @@ struct Cache: Sendable {
             "locks",
             "virtual",
         ]
-        try await parallelForEach(topLevelPaths) { path in
+        try await ConcurrentTasks.forEach(topLevelPaths) { path in
             try await AsyncFileSystem.createDirectory(
                 at: cacheRoot.appendingPathComponent(path),
                 withIntermediateDirectories: true
             )
         }
-        try await parallelForEach([
+        try await ConcurrentTasks.forEach([
             "registry/archives",
             "metadata/remotes",
             "metadata/registries",
@@ -39,45 +39,50 @@ struct Cache: Sendable {
 
     func sourcePath(pin: ResolvedPin) throws -> URL {
         if pin.kind == "registry" {
-            return root
+            return
+                root
                 .appendingPathComponent("sources")
                 .appendingPathComponent(pin.identity)
                 .appendingPathComponent("\(try pin.versionString())-registry")
         }
         let version = pin.state.version ?? pin.state.branch ?? "revision"
-        return root
+        return
+            root
             .appendingPathComponent("sources")
             .appendingPathComponent(pin.identity)
-            .appendingPathComponent("\(version)-\(shortRevision(try pin.revision()))")
+            .appendingPathComponent("\(version)-\(Hashing.shortRevision(try pin.revision()))")
     }
 
     func archivePath(url: String, revision: String) -> URL {
         root
             .appendingPathComponent("archives")
-            .appendingPathComponent("\(stableHash(url))-\(shortRevision(revision)).tar.gz")
+            .appendingPathComponent(
+                "\(Hashing.stable(url))-\(Hashing.shortRevision(revision)).tar.gz")
     }
 
     func registryArchivePath(identity: String, version: String) -> URL {
         root
             .appendingPathComponent("registry/archives")
-            .appendingPathComponent("\(stableHash(identity))-\(version).zip")
+            .appendingPathComponent("\(Hashing.stable(identity))-\(version).zip")
     }
 
     func remoteVersionsPath(location: String) -> URL {
         root
             .appendingPathComponent("metadata/remotes")
-            .appendingPathComponent("\(stableHash(location)).json")
+            .appendingPathComponent("\(Hashing.stable(location)).json")
     }
 
     func registryVersionsPath(registryURL: String, identity: String) -> URL {
         root
             .appendingPathComponent("metadata/registries")
-            .appendingPathComponent("\(stableHash(registryURL))-\(stableHash(identity)).json")
+            .appendingPathComponent(
+                "\(Hashing.stable(registryURL))-\(Hashing.stable(identity)).json")
     }
 
     func lock(namespace: String, key: String) async throws -> PathLock {
-        try await pathLock(
-            at: root.appendingPathComponent("locks").appendingPathComponent(namespace).appendingPathComponent("\(stableHash(key)).lock")
+        try await PathLock.acquire(
+            at: root.appendingPathComponent("locks").appendingPathComponent(namespace)
+                .appendingPathComponent("\(Hashing.stable(key)).lock")
         )
     }
 

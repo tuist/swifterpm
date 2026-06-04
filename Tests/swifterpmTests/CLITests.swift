@@ -3,7 +3,7 @@ import Testing
 struct CLITests {
     @Test
     func resolveParsesGlobalAndCommandOptions() throws {
-        let cli = try parseCLI([
+        let cli = try CLIParser.parse([
             "--package-path", "/tmp/package",
             "--cache-path", "/tmp/cache",
             "--scratch-path", "/tmp/scratch",
@@ -24,7 +24,7 @@ struct CLITests {
         #expect(cli.quiet)
         #expect(cli.defaultRegistryURL == "https://registry.example.com")
 
-        guard case let .resolve(options) = cli.command else {
+        guard case .resolve(let options) = cli.command else {
             Issue.record("expected resolve command")
             return
         }
@@ -37,7 +37,7 @@ struct CLITests {
 
     @Test
     func updateParsesPackageNamesAndFlags() throws {
-        let cli = try parseCLI([
+        let cli = try CLIParser.parse([
             "--skip-update",
             "update",
             "foo",
@@ -46,7 +46,7 @@ struct CLITests {
         ])
 
         #expect(cli.skipUpdate)
-        guard case let .update(options) = cli.command else {
+        guard case .update(let options) = cli.command else {
             Issue.record("expected update command")
             return
         }
@@ -56,7 +56,7 @@ struct CLITests {
 
     @Test
     func restoreParsesDirectoryOptions() throws {
-        let cli = try parseCLI([
+        let cli = try CLIParser.parse([
             "--build-path", "/tmp/build",
             "restore",
             "--package-dir", "/tmp/package",
@@ -65,7 +65,7 @@ struct CLITests {
         ])
 
         #expect(cli.buildPath?.path == "/tmp/build")
-        guard case let .restore(options) = cli.command else {
+        guard case .restore(let options) = cli.command else {
             Issue.record("expected restore command")
             return
         }
@@ -77,7 +77,7 @@ struct CLITests {
     @Test
     func commandSpecificUnknownOptionsAreRejected() {
         #expect(throws: (any Error).self) {
-            try parseCLI(["resolve", "--unknown-option"])
+            try CLIParser.parse(["resolve", "--unknown-option"])
         }
     }
 }
