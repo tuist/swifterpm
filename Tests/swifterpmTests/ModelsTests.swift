@@ -53,23 +53,39 @@ struct ModelsTests {
     @Test
     func readAndWriteResolvedFileRoundTripsInsidePackageDirectory() async throws {
         try await withTemporaryDirectory { root in
-            let resolved = ResolvedPins(
-                originHash: "origin",
+            try await writeMinimalPackageManifest(at: root, name: "Fixture")
+            let resolved = try ResolvedPins(
+                originHash: await ResolvedFile.packageOriginHash(packageDir: root),
                 pins: [
                     ResolvedPin(
                         identity: "foo",
                         kind: "remoteSourceControl",
                         location: "https://github.com/example/foo",
                         state: ResolvedState(
-                            branch: nil, revision: "abcdef123456", version: "1.0.0")
-                    )
+                            branch: nil, revision: "abcdef123456", version: "1.0.0"
+                        )
+                    ),
                 ],
                 version: 3
             )
 
             try await ResolvedFile.write(packageDir: root, resolved: resolved)
             #expect(try await ResolvedFile.read(packageDir: root).pins == resolved.pins)
-            #expect(try await ResolvedFile.read(packageDir: root).originHash == "origin")
+            #expect(try await ResolvedFile.read(packageDir: root).originHash == resolved.originHash)
+            #expect(try await ResolvedFile.readIfCurrent(packageDir: root)?.pins == resolved.pins)
+        }
+    }
+
+    @Test
+    func readIfCurrentReturnsNilWhenOriginHashDoesNotMatch() async throws {
+        try await withTemporaryDirectory { root in
+            try await writeMinimalPackageManifest(at: root, name: "Fixture")
+            try await ResolvedFile.write(
+                packageDir: root,
+                resolved: ResolvedPins(originHash: "stale", pins: [], version: 3)
+            )
+
+            #expect(try await ResolvedFile.readIfCurrent(packageDir: root) == nil)
         }
     }
 
@@ -77,8 +93,8 @@ struct ModelsTests {
     func downloadedMixedRegistryAndGitHubResolvedFixtureDecodes() async throws {
         let fixture = try await fixtureURL("MixedRegistryAndGitHub")
         let resolved = try await ResolvedFile.read(packageDir: fixture)
-        let packageManifest = String(
-            data: try await AsyncFileSystem.readData(
+        let packageManifest = try String(
+            data: await AsyncFileSystem.readData(
                 from: fixture.appendingPathComponent("Package.swift")),
             encoding: .utf8
         )

@@ -21,18 +21,24 @@ func withTemporaryDirectory<T>(_ body: (URL) async throws -> T) async throws -> 
 
 func writeCachedManifest(_ manifest: [String: Any], packageDir: URL) async throws {
     try await AsyncFileSystem.createDirectory(at: packageDir, withIntermediateDirectories: true)
+    try await writeMinimalPackageManifest(at: packageDir, name: "Fixture")
+    try await AsyncFileSystem.atomicWrite(
+        JSONFormatter.prettyData(manifest),
+        to: packageDir.appendingPathComponent(ManifestLoader.cacheFile)
+    )
+}
+
+func writeMinimalPackageManifest(at packageDir: URL, name: String) async throws {
+    try await AsyncFileSystem.createDirectory(at: packageDir, withIntermediateDirectories: true)
     try await AsyncFileSystem.atomicWrite(
         """
         // swift-tools-version: 6.0
         import PackageDescription
 
-        let package = Package(name: "Fixture")
+        let package = Package(name: "\(name)")
         """,
         to: packageDir.appendingPathComponent("Package.swift")
     )
-    try await AsyncFileSystem.atomicWrite(
-        try JSONFormatter.prettyData(manifest),
-        to: packageDir.appendingPathComponent(ManifestLoader.cacheFile))
 }
 
 func fixtureURL(_ components: String...) async throws -> URL {
@@ -42,9 +48,9 @@ func fixtureURL(_ components: String...) async throws -> URL {
 func fixtureURL(_ components: [String]) async throws -> URL {
     let relative = ["Tests", "swifterpmTests", "Fixtures"] + components
     let env = ProcessInfo.processInfo.environment
-    var candidates = [
-        URL(fileURLWithPath: try await AsyncFileSystem.currentDirectoryPath())
-            .appendingPathComponents(relative)
+    var candidates = try [
+        URL(fileURLWithPath: await AsyncFileSystem.currentDirectoryPath())
+            .appendingPathComponents(relative),
     ]
 
     if let testSrcDir = env["TEST_SRCDIR"] {
@@ -57,7 +63,7 @@ func fixtureURL(_ components: [String]) async throws -> URL {
         candidates.append(srcDir.appendingPathComponent("_main").appendingPathComponents(relative))
     }
 
-    for candidate in candidates where (try await AsyncFileSystem.exists(candidate)) {
+    for candidate in candidates where try (await AsyncFileSystem.exists(candidate)) {
         return candidate
     }
     throw ToolError.message("fixture not found: \(components.joined(separator: "/"))")
@@ -81,10 +87,10 @@ func installedSwiftSupportsManifest(at packageDir: URL) async throws -> Bool {
 
 private func manifestToolsVersion(at packageDir: URL) async throws -> SwiftToolchainVersion? {
     let manifest = packageDir.appendingPathComponent("Package.swift")
-    let contents = String(data: try await AsyncFileSystem.readData(from: manifest), encoding: .utf8)
+    let contents = try String(data: await AsyncFileSystem.readData(from: manifest), encoding: .utf8)
         ?? ""
     guard let firstLine = contents.split(separator: "\n", omittingEmptySubsequences: false).first,
-        let range = firstLine.range(of: "swift-tools-version:")
+          let range = firstLine.range(of: "swift-tools-version:")
     else {
         return nil
     }
@@ -100,11 +106,11 @@ private func installedSwiftVersion() async throws -> SwiftToolchainVersion {
     let output = try await SystemProcess.output("/usr/bin/swift", ["--version"])
     for marker in ["Apple Swift version ", "Swift version "] {
         if let range = output.range(of: marker),
-            let version = SwiftToolchainVersion(
-                String(
-                    output[range.upperBound...]
-                        .prefix(while: { $0.isNumber || $0 == "." })
-                ))
+           let version = SwiftToolchainVersion(
+               String(
+                   output[range.upperBound...]
+                       .prefix(while: { $0.isNumber || $0 == "." })
+               ))
         {
             return version
         }

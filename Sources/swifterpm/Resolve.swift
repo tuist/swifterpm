@@ -47,9 +47,10 @@ enum PackageResolver {
         progress: ResolutionProgressReporter? = nil
     ) async throws -> ResolvedPins {
         let manifest = try await ManifestLoader.dumpPackage(
-            packageDir: packageDir, disableSandbox: disableSandbox)
+            packageDir: packageDir, disableSandbox: disableSandbox
+        )
         let dependencies = try ManifestParser.dependencies(manifest)
-        let originHash = try await originHash(packageDir: packageDir)
+        let originHash = try await ResolvedFile.packageOriginHash(packageDir: packageDir)
         guard !dependencies.isEmpty else {
             return ResolvedPins(originHash: originHash, pins: [], version: 3)
         }
@@ -121,7 +122,7 @@ enum PackageResolver {
             self.rootDirectPackages = rootDirectPackages
             self.progress = progress
             versions[.root] = [
-                ResolvedVersion(version: SemVer(major: 0, minor: 0, patch: 0), revision: nil)
+                ResolvedVersion(version: SemVer(major: 0, minor: 0, patch: 0), revision: nil),
             ]
         }
 
@@ -139,7 +140,7 @@ enum PackageResolver {
             var iterations = 0
             while !queue.isEmpty {
                 iterations += 1
-                if iterations > 10_000 {
+                if iterations > 10000 {
                     throw ToolError.message("dependency resolution exceeded iteration limit")
                 }
 
@@ -151,7 +152,7 @@ enum PackageResolver {
                 }
                 guard
                     let chosen = matching.first(where: { $0.version.prerelease.isEmpty })
-                        ?? matching.first
+                    ?? matching.first
                 else {
                     throw ToolError.message("no versions found for \(package) matching constraints")
                 }
@@ -163,7 +164,8 @@ enum PackageResolver {
                 progress?.selected(package: package.identity, version: chosen.version.description)
 
                 let transitives = try await dependenciesFor(
-                    package: package, version: chosen.version)
+                    package: package, version: chosen.version
+                )
                 var discoveredPackages: [PackageKey] = []
                 for (dependency, range) in transitives {
                     let existing = constraints[dependency, default: []]
@@ -178,9 +180,10 @@ enum PackageResolver {
 
             var pins: [ResolvedPin] = []
             for (package, resolvedVersion) in selected where package != .root {
-                pins.append(
-                    try await pinForResolvedVersion(
-                        package: package, resolvedVersion: resolvedVersion))
+                try pins.append(
+                    await pinForResolvedVersion(
+                        package: package, resolvedVersion: resolvedVersion
+                    ))
             }
             pins.append(contentsOf: fixedPins.values)
             return pins
@@ -192,8 +195,7 @@ enum PackageResolver {
                 return
             }
 
-            let fetched = try await withThrowingTaskGroup(of: (PackageKey, [ResolvedVersion]).self)
-            {
+            let fetched = try await withThrowingTaskGroup(of: (PackageKey, [ResolvedVersion]).self) {
                 group in
                 for package in missing {
                     let cache = cache
@@ -251,14 +253,16 @@ enum PackageResolver {
                 resolved = []
             case .sourceControl:
                 let remote = try await RemoteMetadata.versions(
-                    location: package.location, cache: cache)
+                    location: package.location, cache: cache
+                )
                 resolved = remote.compactMap { remoteVersion in
                     guard let semver = remoteVersion.semver else { return nil }
                     return ResolvedVersion(version: semver, revision: remoteVersion.revision)
                 }
             case .registry:
                 let registry = try await RegistryClient.versions(
-                    identity: package.identity, registryConfig: registryConfig, cache: cache)
+                    identity: package.identity, registryConfig: registryConfig, cache: cache
+                )
                 resolved = registry.compactMap { registryVersion in
                     guard let semver = registryVersion.semver else { return nil }
                     return ResolvedVersion(version: semver, revision: nil)
@@ -277,14 +281,16 @@ enum PackageResolver {
             }
 
             progress?.startedInspectingManifest(
-                package: package.identity, version: version.description)
+                package: package.identity, version: version.description
+            )
             let source = try await manifestSource(package: package, version: version)
             let manifest = try await ManifestLoader.dumpPackage(
-                packageDir: source, disableSandbox: disableSandbox)
+                packageDir: source, disableSandbox: disableSandbox
+            )
             let manifestDependencies =
                 rootDirectPackages.contains(package)
-                ? try ManifestParser.dependencies(manifest)
-                : try ManifestParser.requiredDependencies(manifest)
+                    ? try ManifestParser.dependencies(manifest)
+                    : try ManifestParser.requiredDependencies(manifest)
 
             var result: [(PackageKey, VersionRange)] = []
             for dependency in manifestDependencies {
@@ -316,39 +322,40 @@ enum PackageResolver {
                 return try await WorkspaceRestorer.ensureSource(cache: cache, pin: pin)
             case .registry:
                 return try await WorkspaceRestorer.ensureRegistrySource(
-                    cache: cache, registryConfig: registryConfig, pin: pin)
+                    cache: cache, registryConfig: registryConfig, pin: pin
+                )
             }
         }
 
         private func manifestSource(package: PackageKey, version: SemVer) async throws -> URL {
             if package.kind == .sourceControl,
-                let local = try await PackageResolver.localSourceControlPackageLocation(
-                    package.location)
+               let local = try await PackageResolver.localSourceControlPackageLocation(
+                   package.location)
             {
                 return local
             }
             return try await materialize(package: package, version: version)
         }
 
-        private func pinForVersion(package: PackageKey, version: SemVer) async throws -> ResolvedPin
-        {
+        private func pinForVersion(package: PackageKey, version: SemVer) async throws -> ResolvedPin {
             switch package.kind {
             case .root:
                 throw ToolError.message("root package has no pin")
             case .sourceControl:
                 let versions = try await resolvedVersions(package)
                 guard let resolvedVersion = versions.first(where: { $0.version == version }),
-                    let revision = resolvedVersion.revision
+                      let revision = resolvedVersion.revision
                 else {
                     throw ToolError.message(
                         "version \(version) was not found for \(package.identity)")
                 }
-                return ResolvedPin(
+                return try ResolvedPin(
                     identity: package.identity,
-                    kind: try await PackageResolver.sourceControlKind(location: package.location),
+                    kind: await PackageResolver.sourceControlKind(location: package.location),
                     location: package.location,
                     state: ResolvedState(
-                        branch: nil, revision: revision, version: version.description)
+                        branch: nil, revision: revision, version: version.description
+                    )
                 )
             case .registry:
                 return ResolvedPin(
@@ -371,13 +378,14 @@ enum PackageResolver {
                     throw ToolError.message(
                         "version \(resolvedVersion.version) was not found for \(package.identity)")
                 }
-                return ResolvedPin(
+                return try ResolvedPin(
                     identity: package.identity,
-                    kind: try await PackageResolver.sourceControlKind(location: package.location),
+                    kind: await PackageResolver.sourceControlKind(location: package.location),
                     location: package.location,
                     state: ResolvedState(
                         branch: nil, revision: revision,
-                        version: resolvedVersion.version.description)
+                        version: resolvedVersion.version.description
+                    )
                 )
             case .registry:
                 return ResolvedPin(
@@ -385,7 +393,8 @@ enum PackageResolver {
                     kind: "registry",
                     location: "",
                     state: ResolvedState(
-                        branch: nil, revision: nil, version: resolvedVersion.version.description)
+                        branch: nil, revision: nil, version: resolvedVersion.version.description
+                    )
                 )
             }
         }
@@ -401,13 +410,14 @@ enum PackageResolver {
 
         let state: ResolvedState
         switch dependency.requirement {
-        case .revision(let revision):
+        case let .revision(revision):
             state = ResolvedState(branch: nil, revision: revision, version: nil)
-        case .branch(let branch):
-            state = ResolvedState(
+        case let .branch(branch):
+            state = try ResolvedState(
                 branch: branch,
-                revision: try await RemoteMetadata.resolveNamedRef(
-                    location: dependency.location, name: branch),
+                revision: await RemoteMetadata.resolveNamedRef(
+                    location: dependency.location, name: branch
+                ),
                 version: nil
             )
         case .exact, .range:
@@ -415,9 +425,9 @@ enum PackageResolver {
                 "internal error: versioned requirement reached unversioned resolver")
         }
 
-        return ResolvedPin(
+        return try ResolvedPin(
             identity: dependency.identity,
-            kind: try await PackageResolver.sourceControlKind(location: dependency.location),
+            kind: await PackageResolver.sourceControlKind(location: dependency.location),
             location: dependency.location,
             state: state
         )
@@ -429,7 +439,7 @@ enum PackageResolver {
         for pin in pins {
             let key = pin.identity.lowercased()
             if let existing = chosen[key] {
-                if existing.state.version == nil && pin.state.version != nil {
+                if existing.state.version == nil, pin.state.version != nil {
                     chosen[key] = pin
                 }
             } else {
@@ -473,11 +483,5 @@ enum PackageResolver {
     static func sourceControlKind(location: String) async throws -> String {
         let local = try await localSourceControlPackageLocation(location)
         return local == nil ? "remoteSourceControl" : "localSourceControl"
-    }
-
-    private static func originHash(packageDir: URL) async throws -> String {
-        Hashing.sha256Hex(
-            try await AsyncFileSystem.readData(
-                from: packageDir.appendingPathComponent("Package.swift")))
     }
 }

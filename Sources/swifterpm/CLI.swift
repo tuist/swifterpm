@@ -148,18 +148,18 @@ struct SwifterPMCommand: AsyncParsableCommand {
     }
 
     mutating func runAsync() async throws {
-        try await CLIRunner.run(try makeCLI())
+        try await CLIRunner.run(makeCLI())
     }
 
     func makeCLI() throws -> CLI {
         let command: CLI.Command
         switch action {
         case .resolve:
-            command = .resolve(try ResolveArguments.parse(commandArguments).makeOptions())
+            command = try .resolve(ResolveArguments.parse(commandArguments).makeOptions())
         case .update:
-            command = .update(try UpdateArguments.parse(commandArguments).makeOptions())
+            command = try .update(UpdateArguments.parse(commandArguments).makeOptions())
         case .restore:
-            command = .restore(try RestoreArguments.parse(commandArguments).makeOptions())
+            command = try .restore(RestoreArguments.parse(commandArguments).makeOptions())
         }
 
         return CLI(
@@ -307,7 +307,7 @@ enum CLIRunner {
         }
 
         switch cli.command {
-        case .resolve(let options):
+        case let .resolve(options):
             try ensureWholePackageResolution(
                 packageName: options.packageName,
                 version: options.version,
@@ -318,11 +318,12 @@ enum CLIRunner {
                 cli: cli,
                 packageDir: options.packageDir,
                 cacheDir: options.cacheDir,
+                preferResolvedFile: true,
                 write: options.write,
                 restore: options.restore,
                 printOnly: options.printOnly
             )
-        case .update(let options):
+        case let .update(options):
             if !options.packageNames.isEmpty {
                 throw ToolError.message("package-specific update is not supported yet")
             }
@@ -330,28 +331,34 @@ enum CLIRunner {
                 cli: cli,
                 packageDir: options.packageDir,
                 cacheDir: options.cacheDir,
+                preferResolvedFile: false,
                 write: options.write,
                 restore: options.restore,
                 printOnly: options.printOnly
             )
-        case .restore(let options):
+        case let .restore(options):
             let cache = try await Cache(
                 root: cliCacheDir(cli: cli, commandCacheDir: options.cacheDir))
             let package = try await canonicalPackageDir(
                 commandPackageDir(cli: cli, commandPackageDir: options.packageDir))
             let scratch = commandScratchDir(
-                cli: cli, packageDir: package, commandScratchDir: options.scratchDir)
+                cli: cli, packageDir: package, commandScratchDir: options.scratchDir
+            )
             let registryConfig = try await cliRegistryConfig(cli: cli, package: package)
             let resolved = try await ResolvedFile.read(packageDir: package)
             try await WorkspaceRestorer.restorePackage(
                 scratchDir: scratch, cache: cache, registryConfig: registryConfig,
                 resolved: resolved,
-                quiet: cli.quiet)
+                quiet: cli.quiet,
+                disableSandbox: cli.disableSandbox
+            )
             try await maybeWritePackageInfoCache(
-                cli: cli, package: package, scratch: scratch, resolved: resolved)
+                cli: cli, package: package, scratch: scratch, resolved: resolved
+            )
             try await WorkspaceRestorer.writeWorkspaceState(
                 packageDir: package, scratchDir: scratch, resolved: resolved,
-                disableSandbox: cli.disableSandbox)
+                disableSandbox: cli.disableSandbox
+            )
         }
     }
 
@@ -359,6 +366,7 @@ enum CLIRunner {
         cli: CLI,
         packageDir: URL,
         cacheDir: URL?,
+        preferResolvedFile: Bool,
         write: Bool,
         restore: Bool,
         printOnly: Bool
@@ -370,21 +378,26 @@ enum CLIRunner {
         let registryConfig = try await cliRegistryConfig(cli: cli, package: package)
         let readOnly =
             cli.forceResolvedVersions || cli.disableAutomaticResolution
-            || cli.onlyUseVersionsFromResolvedFile
+                || cli.onlyUseVersionsFromResolvedFile
 
         let resolved: ResolvedPins
         let hasResolvedFile =
             cli.skipUpdate
-            ? try await AsyncFileSystem.exists(package.appendingPathComponent("Package.resolved"))
-            : false
+                ? try await AsyncFileSystem.exists(package.appendingPathComponent("Package.resolved"))
+                : false
         if readOnly || hasResolvedFile {
             resolved = try await ResolvedFile.read(packageDir: package)
+        } else if preferResolvedFile,
+                  let existing = try await ResolvedFile.readIfCurrent(packageDir: package)
+        {
+            resolved = existing
         } else {
             let progress = cli.quiet ? nil : ResolutionProgressReporter()
             let fresh = try await PackageResolver.resolve(
                 packageDir: package, cache: cache, registryConfig: registryConfig,
                 disableSandbox: cli.disableSandbox,
-                progress: progress)
+                progress: progress
+            )
             if shouldWrite(write: write, printOnly: printOnly) {
                 try await ResolvedFile.write(packageDir: package, resolved: fresh)
             }
@@ -398,12 +411,16 @@ enum CLIRunner {
             try await WorkspaceRestorer.restorePackage(
                 scratchDir: scratch, cache: cache, registryConfig: registryConfig,
                 resolved: resolved,
-                quiet: cli.quiet)
+                quiet: cli.quiet,
+                disableSandbox: cli.disableSandbox
+            )
             try await maybeWritePackageInfoCache(
-                cli: cli, package: package, scratch: scratch, resolved: resolved)
+                cli: cli, package: package, scratch: scratch, resolved: resolved
+            )
             try await WorkspaceRestorer.writeWorkspaceState(
                 packageDir: package, scratchDir: scratch, resolved: resolved,
-                disableSandbox: cli.disableSandbox)
+                disableSandbox: cli.disableSandbox
+            )
         }
     }
 
@@ -446,15 +463,15 @@ enum CLIRunner {
     private static func cliRegistryConfig(cli: CLI, package: URL) async throws -> RegistryConfig {
         try await RegistryConfig.load(
             packageDir: package, configPath: cli.configPath,
-            defaultRegistryURL: cli.defaultRegistryURL)
+            defaultRegistryURL: cli.defaultRegistryURL
+        )
     }
 
     private static func commandPackageDir(cli: CLI, commandPackageDir: URL) -> URL {
         cli.packagePath ?? commandPackageDir
     }
 
-    private static func commandScratchDir(cli: CLI, packageDir: URL, commandScratchDir: URL?) -> URL
-    {
+    private static func commandScratchDir(cli: CLI, packageDir: URL, commandScratchDir: URL?) -> URL {
         commandScratchDir ?? cli.scratchPath ?? cli.buildPath
             ?? packageDir.appendingPathComponent(".build")
     }
@@ -463,7 +480,7 @@ enum CLIRunner {
         if packageDir.path.hasPrefix("/") {
             return packageDir.standardizedFileURL.resolvingSymlinksInPath()
         }
-        return URL(fileURLWithPath: try await AsyncFileSystem.currentDirectoryPath())
+        return try URL(fileURLWithPath: await AsyncFileSystem.currentDirectoryPath())
             .appendingPathComponent(packageDir.path)
             .standardizedFileURL
             .resolvingSymlinksInPath()

@@ -17,6 +17,7 @@ struct Cache: Sendable {
             "metadata",
             "locks",
             "virtual",
+            "artifacts",
         ]
         try await ConcurrentTasks.forEach(topLevelPaths) { path in
             try await AsyncFileSystem.createDirectory(
@@ -40,17 +41,17 @@ struct Cache: Sendable {
     func sourcePath(pin: ResolvedPin) throws -> URL {
         if pin.kind == "registry" {
             return
-                root
-                .appendingPathComponent("sources")
-                .appendingPathComponent(pin.identity)
-                .appendingPathComponent("\(try pin.versionString())-registry")
+                try root
+                    .appendingPathComponent("sources")
+                    .appendingPathComponent(pin.identity)
+                    .appendingPathComponent("\(pin.versionString())-registry")
         }
         let version = pin.state.version ?? pin.state.branch ?? "revision"
         return
-            root
-            .appendingPathComponent("sources")
-            .appendingPathComponent(pin.identity)
-            .appendingPathComponent("\(version)-\(Hashing.shortRevision(try pin.revision()))")
+            try root
+                .appendingPathComponent("sources")
+                .appendingPathComponent(pin.identity)
+                .appendingPathComponent("\(version)-\(Hashing.shortRevision(pin.revision()))")
     }
 
     func archivePath(url: String, revision: String) -> URL {
@@ -64,6 +65,21 @@ struct Cache: Sendable {
         root
             .appendingPathComponent("registry/archives")
             .appendingPathComponent("\(Hashing.stable(identity))-\(version).zip")
+    }
+
+    func binaryArtifactArchivePath(url: String, checksum: String) -> URL {
+        root
+            .appendingPathComponent("archives")
+            .appendingPathComponent(
+                "artifact-\(Hashing.stable(url))-\(String(checksum.prefix(12))).zip")
+    }
+
+    func binaryArtifactPath(identity: String, targetName: String, checksum: String) -> URL {
+        root
+            .appendingPathComponent("artifacts")
+            .appendingPathComponent(identity)
+            .appendingPathComponent("\(targetName)-\(String(checksum.prefix(12)))")
+            .appendingPathComponent("\(targetName).xcframework")
     }
 
     func remoteVersionsPath(location: String) -> URL {

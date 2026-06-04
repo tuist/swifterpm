@@ -34,6 +34,18 @@ struct ResolvedState: Codable, Equatable, Sendable {
 }
 
 enum ResolvedFile {
+    static func readIfCurrent(packageDir: URL) async throws -> ResolvedPins? {
+        let path = packageDir.appendingPathComponent("Package.resolved")
+        guard try await AsyncFileSystem.exists(path) else { return nil }
+
+        let resolved = try await read(packageDir: packageDir)
+        guard let originHash = resolved.originHash else { return nil }
+        guard try originHash == (await packageOriginHash(packageDir: packageDir)) else {
+            return nil
+        }
+        return resolved
+    }
+
     static func read(packageDir: URL) async throws -> ResolvedPins {
         let data = try await AsyncFileSystem.readData(
             from: packageDir.appendingPathComponent("Package.resolved"))
@@ -45,7 +57,8 @@ enum ResolvedFile {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(resolved) + Data("\n".utf8)
         try await AsyncFileSystem.atomicWrite(
-            data, to: packageDir.appendingPathComponent("Package.resolved"))
+            data, to: packageDir.appendingPathComponent("Package.resolved")
+        )
     }
 
     static func print(_ resolved: ResolvedPins) {
@@ -60,6 +73,12 @@ enum ResolvedFile {
                 Swift.print("\(pin.identity) \(pin.state.revision ?? "<unknown>") \(pin.location)")
             }
         }
+    }
+
+    static func packageOriginHash(packageDir: URL) async throws -> String {
+        try Hashing.sha256Hex(
+            await AsyncFileSystem.readData(
+                from: packageDir.appendingPathComponent("Package.swift")))
     }
 }
 
@@ -91,6 +110,6 @@ enum PinKind {
 
     static func registryDownloadSubpath(_ pin: ResolvedPin) throws -> String {
         let (scope, name) = try PinKind.registryIdentityParts(pin.identity)
-        return "\(scope)/\(name)/\(try pin.versionString())"
+        return try "\(scope)/\(name)/\(pin.versionString())"
     }
 }

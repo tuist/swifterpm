@@ -19,7 +19,7 @@ struct CacheTests {
 
             #expect(try cache.sourcePath(pin: pin).path.hasPrefix(root.path))
             #expect(
-                cache.archivePath(url: pin.location, revision: try pin.revision()).path.hasPrefix(
+                try cache.archivePath(url: pin.location, revision: pin.revision()).path.hasPrefix(
                     root.path)
             )
             #expect(cache.remoteVersionsPath(location: pin.location).path.hasPrefix(root.path))
@@ -47,6 +47,7 @@ struct CacheTests {
                 "metadata/registries",
                 "locks",
                 "virtual/checkouts",
+                "artifacts",
             ] {
                 #expect(try await AsyncFileSystem.exists(root.appendingPathComponent(path)))
             }
