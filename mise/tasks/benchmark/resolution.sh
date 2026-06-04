@@ -3,11 +3,13 @@
 #USAGE flag "--runs <runs>" help="Number of hyperfine runs per benchmark" default="3"
 #USAGE flag "--output-dir <output-dir>" help="Directory where benchmark reports are written" default="benchmark-results"
 #USAGE flag "--swifterpm-bin <swifterpm-bin>" help="Path to a swifterpm executable. Defaults to bazel-bin/swifterpm"
+#USAGE flag "--tuist-source <tuist-source>" help="Path to a local Tuist checkout to include in the benchmark"
 set -euo pipefail
 
 runs="3"
 output_dir="benchmark-results"
 swifterpm_bin=""
+tuist_source=""
 
 while (($# > 0)); do
   case "$1" in
@@ -21,6 +23,10 @@ while (($# > 0)); do
       ;;
     --swifterpm-bin)
       swifterpm_bin="$2"
+      shift 2
+      ;;
+    --tuist-source)
+      tuist_source="$2"
       shift 2
       ;;
     *)
@@ -57,9 +63,19 @@ copy_tree() {
   rm -rf "${destination}"
   mkdir -p "$(dirname "${destination}")"
   if command -v rsync >/dev/null 2>&1; then
-    rsync -a --delete "${source}/" "${destination}/"
+    rsync -a --delete \
+      --exclude ".git/" \
+      --exclude ".build/" \
+      --exclude "Derived/" \
+      --exclude "node_modules/" \
+      "${source}/" "${destination}/"
   else
     cp -R "${source}" "${destination}"
+    rm -rf \
+      "${destination}/.git" \
+      "${destination}/.build" \
+      "${destination}/Derived" \
+      "${destination}/node_modules"
   fi
 }
 
@@ -100,6 +116,7 @@ run_hyperfine() {
   hyperfine \
     --runs "${runs}" \
     --warmup 0 \
+    --style none \
     --export-markdown "${markdown_path}" \
     --export-json "${json_path}" \
     --prepare "${prepare}" \
@@ -116,20 +133,15 @@ run_hyperfine() {
   } >> "${combined_report}"
 }
 
-benchmark_codebase() {
+benchmark_prepared_codebase() {
   local name="$1"
   local slug="$2"
-  local repo="$3"
-  local ref="$4"
-  local package_relative_path="$5"
+  local source_dir="$3"
+  local package_relative_path="$4"
 
   local codebase_root="${work_root}/${slug}"
-  local source_dir="${codebase_root}/source"
   local swiftpm_dir="${codebase_root}/swiftpm"
   local swifterpm_dir="${codebase_root}/swifterpm"
-
-  echo "Cloning ${name} (${repo}@${ref})"
-  git clone --depth 1 --branch "${ref}" "${repo}" "${source_dir}"
 
   local source_package_dir="${source_dir}/${package_relative_path}"
   if [[ ! -f "${source_package_dir}/Package.swift" ]]; then
@@ -192,6 +204,34 @@ benchmark_codebase() {
     "${output_dir}/${slug}-warm.json"
 }
 
+benchmark_codebase() {
+  local name="$1"
+  local slug="$2"
+  local repo="$3"
+  local ref="$4"
+  local package_relative_path="$5"
+
+  local source_dir="${work_root}/${slug}/source"
+
+  echo "Cloning ${name} (${repo}@${ref})"
+  git clone --depth 1 --branch "${ref}" "${repo}" "${source_dir}"
+
+  benchmark_prepared_codebase "${name}" "${slug}" "${source_dir}" "${package_relative_path}"
+}
+
+benchmark_local_codebase() {
+  local name="$1"
+  local slug="$2"
+  local source="$3"
+  local package_relative_path="$4"
+
+  local absolute_source
+  absolute_source="$(cd "${source}" && pwd)"
+
+  echo "Copying ${name} from ${absolute_source}"
+  benchmark_prepared_codebase "${name}" "${slug}" "${absolute_source}" "${package_relative_path}"
+}
+
 mkdir -p "${output_dir}"
 output_dir="$(cd "${output_dir}" && pwd)"
 combined_report="${output_dir}/resolution-latest.md"
@@ -221,6 +261,14 @@ benchmark_codebase \
   "https://github.com/mozilla-mobile/firefox-ios.git" \
   "main" \
   "."
+
+if [[ -n "${tuist_source}" ]]; then
+  benchmark_local_codebase \
+    "Tuist" \
+    "tuist" \
+    "${tuist_source}" \
+    "."
+fi
 
 echo "Benchmark reports written to ${output_dir}"
 echo "Combined report: ${combined_report}"

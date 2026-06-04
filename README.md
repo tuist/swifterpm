@@ -10,6 +10,9 @@ Other package managers have already iterated on this problem. Tools like pnpm an
 
 Tuist generated projects gave us a clean contract to replace: package resolution is decoupled from project integration, so `tuist install` can use a faster resolver/restorer before Tuist generates or updates the Xcode project.
 
+> [!NOTE]
+> [`aube`](https://github.com/endevco/aube) is useful prior art for package-manager acceleration in concurrent worktrees. `swifterpm` applies the same broad caching motivation to SwiftPM and Tuist workflows.
+
 > [!IMPORTANT]
 > `swifterpm` cannot transparently speed up standard Xcode projects. Xcode integrates SwiftPM internally, and that integration does not expose a supported hook where we can replace the resolver or checkout restorer. For now, this improvement is aimed at Tuist workflows and other flows that can call `swifterpm` before project integration.
 
@@ -57,7 +60,7 @@ Useful SwiftPM-shaped flags are supported, including `--package-path`, `--cache-
 `swifterpm` also ships a Bzlmod extension with the same resolver helper shape as `rules_swift_package_manager`:
 
 ```starlark
-bazel_dep(name = "swifterpm", version = "0.1.0")
+bazel_dep(name = "swifterpm", version = "0.3.0")
 
 swift_deps = use_extension("@swifterpm//:extensions.bzl", "swift_deps")
 swift_deps.from_package(
@@ -100,12 +103,12 @@ mise exec -- bazel build //:swifterpm_macos
 
 ## Benchmarks 📊
 
-The benchmark script is [mise/tasks/benchmark/resolution.sh](mise/tasks/benchmark/resolution.sh). It clones each repository into a temporary directory, deletes it on completion, and compares SwiftPM against `swifterpm` for cold resolution and worktree-warm resolution.
+The benchmark script is [mise/tasks/benchmark/resolution.sh](mise/tasks/benchmark/resolution.sh). It clones or copies each codebase into a temporary directory, deletes it on completion, and compares SwiftPM against `swifterpm` for cold resolution and worktree-warm resolution.
 
 Run it with:
 
 ```sh
-mise run benchmark:resolution -- --runs 3
+mise run benchmark:resolution -- --runs 3 --tuist-source ../tuist
 ```
 
 Latest single-run sample, generated on macOS 26.4.1 with Apple Swift 6.3.2:
