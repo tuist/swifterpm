@@ -58,7 +58,7 @@ enum WorkspaceRestorer {
         let results = try await ConcurrentTasks.map(pins) { pin in
             let source = try await ensureSource(cache: cache, pin: pin)
             let checkout = checkouts.appendingPathComponent(PinKind.checkoutDirectoryName(pin))
-            try await AsyncFileSystem.replaceWithSymlinkedDirectoryContents(
+            try await AsyncFileSystem.replaceWithSymlinkedDirectory(
                 source: source, destination: checkout)
             return (pin.identity, source)
         }
@@ -76,7 +76,7 @@ enum WorkspaceRestorer {
                 cache: cache, registryConfig: registryConfig, pin: pin)
             let download = registryDownloads.appendingPathComponent(
                 try PinKind.registryDownloadSubpath(pin))
-            try await AsyncFileSystem.replaceWithSymlinkedDirectoryContents(
+            try await AsyncFileSystem.replaceWithSymlinkedDirectory(
                 source: source, destination: download)
             return (pin.identity, source)
         }
@@ -287,6 +287,8 @@ enum WorkspaceRestorer {
     ) async throws {
         var dependencies: [[String: Any]] = []
         var artifacts: [[String: Any]] = []
+        let hasArtifactsRoot = try await AsyncFileSystem.exists(
+            scratchDir.appendingPathComponent("artifacts"))
 
         for pin in resolved.pins {
             if PinKind.isSourceControl(pin.kind) {
@@ -307,8 +309,10 @@ enum WorkspaceRestorer {
                     ],
                     "subpath": PinKind.checkoutDirectoryName(pin),
                 ])
-                artifacts.append(
-                    contentsOf: try await discoverArtifacts(scratchDir: scratchDir, pin: pin))
+                if hasArtifactsRoot {
+                    artifacts.append(
+                        contentsOf: try await discoverArtifacts(scratchDir: scratchDir, pin: pin))
+                }
             } else if PinKind.isRegistry(pin.kind) {
                 dependencies.append([
                     "basedOn": NSNull(),
@@ -324,8 +328,10 @@ enum WorkspaceRestorer {
                     ],
                     "subpath": try PinKind.registryDownloadSubpath(pin),
                 ])
-                artifacts.append(
-                    contentsOf: try await discoverArtifacts(scratchDir: scratchDir, pin: pin))
+                if hasArtifactsRoot {
+                    artifacts.append(
+                        contentsOf: try await discoverArtifacts(scratchDir: scratchDir, pin: pin))
+                }
             }
         }
 

@@ -69,4 +69,43 @@ struct RestoreTests {
                     == ["foo", "example.package"])
         }
     }
+
+    @Test
+    func writeWorkspaceStateDiscoversArtifactsWhenArtifactsRootExists() async throws {
+        try await withTemporaryDirectory { root in
+            let package = root.appendingPathComponent("Package")
+            let scratch = root.appendingPathComponent("scratch")
+            try await writeCachedManifest(emptyManifest(), packageDir: package)
+            try await AsyncFileSystem.createDirectory(
+                at: scratch.appendingPathComponent("artifacts/foo/Foo.xcframework"),
+                withIntermediateDirectories: true)
+
+            let resolved = ResolvedPins(
+                originHash: "origin",
+                pins: [
+                    ResolvedPin(
+                        identity: "foo",
+                        kind: "remoteSourceControl",
+                        location: "https://github.com/example/foo.git",
+                        state: ResolvedState(
+                            branch: nil, revision: "abcdef1234567890", version: "1.2.3")
+                    )
+                ],
+                version: 3
+            )
+
+            try await WorkspaceRestorer.writeWorkspaceState(
+                packageDir: package, scratchDir: scratch, resolved: resolved, disableSandbox: false)
+
+            let statePath = scratch.appendingPathComponent("workspace-state.json")
+            let state = try #require(
+                JSONSerialization.jsonObject(
+                    with: try await AsyncFileSystem.readData(from: statePath))
+                    as? [String: Any])
+            let object = try #require(state["object"] as? [String: Any])
+            let artifacts = try #require(object["artifacts"] as? [[String: Any]])
+            #expect(artifacts.count == 1)
+            #expect(artifacts.first?["targetName"] as? String == "Foo")
+        }
+    }
 }

@@ -30,7 +30,7 @@ struct SupportTests {
     }
 
     @Test
-    func filesystemHelpersFlattenAndSymlinkDirectoryContents() async throws {
+    func filesystemHelpersFlattenAndSymlinkDirectory() async throws {
         try await withTemporaryDirectory { root in
             let source = root.appendingPathComponent("source")
             let nested = root.appendingPathComponent("outer/nested")
@@ -46,10 +46,15 @@ struct SupportTests {
                 try await AsyncFileSystem.exists(root.appendingPathComponent("outer/nested.txt")))
 
             let destination = root.appendingPathComponent("destination")
-            try await AsyncFileSystem.replaceWithSymlinkedDirectoryContents(
+            try await AsyncFileSystem.replaceWithSymlinkedDirectory(
                 source: source, destination: destination)
+            #expect(try await AsyncFileSystem.exists(destination))
+            #expect(!(try await AsyncFileSystem.isDirectoryAndNotSymlink(destination)))
             #expect(
                 try await AsyncFileSystem.exists(destination.appendingPathComponent("file.txt")))
+            let data = try await AsyncFileSystem.readData(
+                from: destination.appendingPathComponent("file.txt"))
+            #expect(String(data: data, encoding: .utf8) == "value")
             #expect(
                 !(try await AsyncFileSystem.isDirectoryAndNotSymlink(
                     destination.appendingPathComponent("file.txt"))))
