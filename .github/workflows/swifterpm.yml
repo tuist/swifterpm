@@ -14,6 +14,22 @@ env:
   MISE_GITHUB_ATTESTATIONS: "0"
 
 jobs:
+  unit:
+    name: unit
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Install mise tools
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
+        with:
+          version: ${{ env.MISE_VERSION }}
+          cache: true
+          install_args: bazel
+
+      - name: Run unit tests
+        run: mise run test:unit
+
   e2e:
     name: e2e
     runs-on: macos-15
