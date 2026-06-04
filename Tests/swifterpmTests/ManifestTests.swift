@@ -11,40 +11,40 @@ struct ManifestTests {
                             "identity": "Foo",
                             "location": [
                                 "remote": [
-                                    ["urlString": "https://github.com/example/foo.git"],
-                                ],
+                                    ["urlString": "https://github.com/example/foo.git"]
+                                ]
                             ],
                             "requirement": [
                                 "range": [
                                     [
                                         "lowerBound": "1.0.0",
                                         "upperBound": "2.0.0",
-                                    ],
-                                ],
+                                    ]
+                                ]
                             ],
-                        ],
-                    ],
+                        ]
+                    ]
                 ],
                 [
                     "registry": [
                         [
                             "identity": "example.bar",
                             "requirement": [
-                                "exact": ["3.4.5"],
+                                "exact": ["3.4.5"]
                             ],
-                        ],
-                    ],
+                        ]
+                    ]
                 ],
-            ],
+            ]
         ]
 
-        let dependencies = try parseManifestDependencies(manifest)
+        let dependencies = try ManifestParser.dependencies(manifest)
 
         #expect(dependencies.count == 2)
         #expect(dependencies[0].identity == "Foo")
         #expect(dependencies[0].kind == .sourceControl)
         #expect(dependencies[0].location == "https://github.com/example/foo.git")
-        guard case let .range(lower, upper) = dependencies[0].requirement else {
+        guard case .range(let lower, let upper) = dependencies[0].requirement else {
             Issue.record("expected range requirement")
             return
         }
@@ -53,7 +53,7 @@ struct ManifestTests {
 
         #expect(dependencies[1].identity == "example.bar")
         #expect(dependencies[1].kind == .registry)
-        guard case let .exact(version) = dependencies[1].requirement else {
+        guard case .exact(let version) = dependencies[1].requirement else {
             Issue.record("expected exact requirement")
             return
         }
@@ -67,27 +67,27 @@ struct ManifestTests {
                 [
                     "name": "App",
                     "targets": ["App"],
-                ],
+                ]
             ],
             "targets": [
                 [
                     "name": "App",
                     "dependencies": [
-                        ["product": ["FooProduct", "Foo"]],
+                        ["product": ["FooProduct", "Foo"]]
                     ],
-                ],
+                ]
             ],
             "dependencies": [
                 [
                     "sourceControl": [
                         sourceDependency(identity: "Foo"),
                         sourceDependency(identity: "Unused"),
-                    ],
-                ],
+                    ]
+                ]
             ],
         ]
 
-        let dependencies = try parseRequiredManifestDependencies(manifest)
+        let dependencies = try ManifestParser.requiredDependencies(manifest)
 
         #expect(dependencies.map(\.identity) == ["Foo"])
     }
@@ -107,12 +107,12 @@ struct ManifestTests {
                             "nameForTargetDependencyResolutionOnly": "Named",
                             "path": "../Named",
                         ],
-                    ],
-                ],
-            ],
+                    ]
+                ]
+            ]
         ]
 
-        let dependencies = try parseManifestFileSystemDependencies(manifest)
+        let dependencies = try ManifestParser.fileSystemDependencies(manifest)
 
         #expect(dependencies.count == 2)
         #expect(dependencies[0].identity == "local-dependency")
@@ -123,11 +123,13 @@ struct ManifestTests {
 
     @Test
     func versionRangeMatchesExactAndOpenRanges() throws {
-        let exact = try #require(versionRange(for: .exact(SemVer("1.2.3"))))
+        let exact = try #require(ManifestParser.versionRange(for: .exact(SemVer("1.2.3"))))
         #expect(try exact.contains(SemVer("1.2.3")))
         #expect(try !exact.contains(SemVer("1.2.4")))
 
-        let range = try #require(versionRange(for: .range(lower: SemVer("1.0.0"), upper: SemVer("2.0.0"))))
+        let range = try #require(
+            ManifestParser.versionRange(for: .range(lower: SemVer("1.0.0"), upper: SemVer("2.0.0")))
+        )
         #expect(try range.contains(SemVer("1.5.0")))
         #expect(try !range.contains(SemVer("2.0.0")))
     }
@@ -137,16 +139,16 @@ struct ManifestTests {
             "identity": identity,
             "location": [
                 "remote": [
-                    ["urlString": "https://github.com/example/\(identity).git"],
-                ],
+                    ["urlString": "https://github.com/example/\(identity).git"]
+                ]
             ],
             "requirement": [
                 "range": [
                     [
                         "lowerBound": "1.0.0",
                         "upperBound": "2.0.0",
-                    ],
-                ],
+                    ]
+                ]
             ],
         ]
     }

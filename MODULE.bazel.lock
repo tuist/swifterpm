@@ -657,7 +657,7 @@
         "bzlTransitiveDigest": "gKtWD1CS4Sqn+lQH91Cimr4D3cJN0MkrzkFJPkoIVMU=",
         "usagesDigest": "NF6WnTzFDZ2rp4u8sdsTVDk3sdyGmczzb6FZ6Rwqfuw=",
         "recordedFileInputs": {
-          "@@//third_party/nio/Package.resolved": "83a0a30df8fc06c7fb77d1cc92c3c4a9ec7ec4bd1d5dd36cea2e03f6bcf794b9"
+          "@@//third_party/nio/Package.resolved": "71e1c04cf71892e5b31e927a7d3eb0d55e7da4e3d6566433e0dff69fed521f59"
         },
         "recordedDirentsInputs": {},
         "envVariables": {},
@@ -669,6 +669,30 @@
               "commit": "f71c8d2a5e74a2c6d11a0fbe324774b5d6084237",
               "remote": "https://github.com/apple/swift-nio.git",
               "version": "2.99.0",
+              "env": {},
+              "env_inherit": [],
+              "cached_json_directory": "",
+              "init_submodules": false,
+              "recursive_init_submodules": true,
+              "patch_args": [
+                "-p0"
+              ],
+              "patch_cmds": [],
+              "patch_cmds_win": [],
+              "patch_tool": "",
+              "patches": [],
+              "publicly_expose_all_targets": false,
+              "replace_scm_with_registry": false,
+              "target_deps": {}
+            }
+          },
+          "swiftpkg_swift_subprocess": {
+            "repoRuleId": "@@rules_swift_package_manager+//swiftpkg/internal:swift_package.bzl%swift_package",
+            "attributes": {
+              "bazel_package_name": "swiftpkg_swift_subprocess",
+              "commit": "11633673a41f509f8945f23c96c7acd4adafd679",
+              "remote": "https://github.com/swiftlang/swift-subprocess.git",
+              "version": "0.5.0",
               "env": {},
               "env_inherit": [],
               "cached_json_directory": "",
@@ -761,7 +785,8 @@
         },
         "moduleExtensionMetadata": {
           "explicitRootModuleDirectDeps": [
-            "swiftpkg_swift_nio"
+            "swiftpkg_swift_nio",
+            "swiftpkg_swift_subprocess"
           ],
           "explicitRootModuleDirectDevDeps": [],
           "useAllRepos": "NO",

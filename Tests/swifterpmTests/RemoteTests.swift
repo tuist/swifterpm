@@ -3,15 +3,16 @@ import Testing
 struct RemoteTests {
     @Test
     func parseSwiftTagVersionAcceptsPlainAndPrefixedVersions() {
-        #expect(parseSwiftTagVersion("1.2.3")?.description == "1.2.3")
-        #expect(parseSwiftTagVersion("v1.2.3")?.description == "1.2.3")
-        #expect(parseSwiftTagVersion("1.2.3-alpha.1")?.description == "1.2.3-alpha.1")
+        #expect(RemoteMetadata.parseSwiftTagVersion("1.2.3")?.description == "1.2.3")
+        #expect(RemoteMetadata.parseSwiftTagVersion("v1.2.3")?.description == "1.2.3")
+        #expect(
+            RemoteMetadata.parseSwiftTagVersion("1.2.3-alpha.1")?.description == "1.2.3-alpha.1")
     }
 
     @Test
     func parseSwiftTagVersionRejectsNonSemanticTags() {
-        #expect(parseSwiftTagVersion("release-1.2.3") == nil)
-        #expect(parseSwiftTagVersion("main") == nil)
+        #expect(RemoteMetadata.parseSwiftTagVersion("release-1.2.3") == nil)
+        #expect(RemoteMetadata.parseSwiftTagVersion("main") == nil)
     }
 
     @Test

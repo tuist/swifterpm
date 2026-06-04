@@ -10,7 +10,7 @@ struct PackageInfoCacheTests {
             let cacheDir = root.appendingPathComponent("package-info")
             try await writeCachedManifest(emptyManifest(), packageDir: package)
 
-            try await writePackageInfoCache(
+            try await PackageInfoCacheWriter.write(
                 packageDir: package,
                 scratchDir: scratch,
                 resolved: ResolvedPins(originHash: "origin", pins: [], version: 3),
@@ -24,7 +24,10 @@ struct PackageInfoCacheTests {
             #expect(try await AsyncFileSystem.exists(indexPath))
             #expect(try await AsyncFileSystem.exists(rootPath))
 
-            let index = try #require(JSONSerialization.jsonObject(with: try await AsyncFileSystem.readData(from: indexPath)) as? [String: Any])
+            let index = try #require(
+                JSONSerialization.jsonObject(
+                    with: try await AsyncFileSystem.readData(from: indexPath))
+                    as? [String: Any])
             #expect(index["schema_version"] as? Int == 1)
             #expect((index["packages"] as? [[String: Any]])?.isEmpty == true)
 
