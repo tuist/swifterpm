@@ -1,6 +1,10 @@
 /target
 /dist
 /.build
+/.cache
+/.config
+/.security
+/.swiftpm
 /bazel-*
 /bazel-bin
 /bazel-out

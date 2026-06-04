@@ -15,7 +15,7 @@ struct SemVer: Hashable, Comparable, CustomStringConvertible, Sendable {
               let minor = Int(core[1]),
               let patch = Int(core[2])
         else {
-            throw fail("invalid semantic version: \(string)")
+            throw ToolError.message("invalid semantic version: \(string)")
         }
         self.major = major
         self.minor = minor

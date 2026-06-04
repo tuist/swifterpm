@@ -22,10 +22,6 @@ enum ToolError: Error, CustomStringConvertible {
     }
 }
 
-func fail(_ message: String) -> ToolError {
-    ToolError.message(message)
-}
-
 struct CommandResult {
     let stdout: Data
     let stderr: Data
@@ -36,6 +32,23 @@ struct CommandResult {
 
     var stderrString: String {
         String(data: stderr, encoding: .utf8) ?? ""
+    }
+}
+
+private final class PipeDataBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+
+    func set(_ value: Data) {
+        lock.withLock {
+            data = value
+        }
+    }
+
+    func get() -> Data {
+        lock.withLock {
+            data
+        }
     }
 }
 
@@ -65,15 +78,41 @@ func runCommand(
     process.standardOutput = stdoutPipe
     process.standardError = stderrPipe
 
-    try process.run()
-    let stdout = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-    let stderr = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+    let stdoutBox = PipeDataBox()
+    let stderrBox = PipeDataBox()
+    let readGroup = DispatchGroup()
+
+    readGroup.enter()
+    DispatchQueue.global(qos: .utility).async {
+        stdoutBox.set(stdoutPipe.fileHandleForReading.readDataToEndOfFile())
+        readGroup.leave()
+    }
+
+    readGroup.enter()
+    DispatchQueue.global(qos: .utility).async {
+        stderrBox.set(stderrPipe.fileHandleForReading.readDataToEndOfFile())
+        readGroup.leave()
+    }
+
+    do {
+        try process.run()
+    } catch {
+        try? stdoutPipe.fileHandleForWriting.close()
+        try? stderrPipe.fileHandleForWriting.close()
+        readGroup.wait()
+        throw error
+    }
+
     process.waitUntilExit()
+    readGroup.wait()
+
+    let stdout = stdoutBox.get()
+    let stderr = stderrBox.get()
 
     if process.terminationStatus != 0 {
         let stderrText = String(data: stderr, encoding: .utf8) ?? ""
         let stdoutText = String(data: stdout, encoding: .utf8) ?? ""
-        throw fail(stderrText.isEmpty ? stdoutText : stderrText)
+        throw ToolError.message(stderrText.isEmpty ? stdoutText : stderrText)
     }
     return CommandResult(stdout: stdout, stderr: stderr)
 }
@@ -92,6 +131,7 @@ func commandOutput(
     ).stdoutString
 }
 
+@discardableResult
 func runCommandAsync(
     _ executable: String,
     _ arguments: [String],
@@ -131,7 +171,7 @@ func httpData(url: URL, headers: [String: String] = [:]) async throws -> Data {
     if let httpResponse = response as? HTTPURLResponse,
        !(200..<300).contains(httpResponse.statusCode)
     {
-        throw fail("HTTP \(httpResponse.statusCode) for \(url.absoluteString)")
+        throw ToolError.message("HTTP \(httpResponse.statusCode) for \(url.absoluteString)")
     }
     return data
 }
@@ -176,11 +216,11 @@ final class PathLock {
         )
         fd = open(path.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH)
         if fd < 0 {
-            throw fail("failed to open lock \(path.path)")
+            throw ToolError.message("failed to open lock \(path.path)")
         }
         if flock(fd, LOCK_EX) != 0 {
             close(fd)
-            throw fail("failed to lock \(path.path)")
+            throw ToolError.message("failed to lock \(path.path)")
         }
     }
 

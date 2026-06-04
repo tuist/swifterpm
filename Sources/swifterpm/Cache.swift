@@ -75,6 +75,6 @@ struct Cache: Sendable {
         if let home = env["HOME"], home.hasPrefix("/") {
             return URL(fileURLWithPath: home).appendingPathComponent(".cache/swifterpm")
         }
-        throw fail("could not find user cache directory from XDG_CACHE_HOME or HOME")
+        throw ToolError.message("could not find user cache directory from XDG_CACHE_HOME or HOME")
     }
 }

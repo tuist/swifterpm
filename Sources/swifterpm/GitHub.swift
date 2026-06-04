@@ -9,11 +9,11 @@ struct GitHubRepo: Sendable {
             ? location.replacingOccurrences(of: "git@github.com:", with: "https://github.com/")
             : location
         guard let url = URL(string: normalized), url.host == "github.com" else {
-            throw fail("not a GitHub URL")
+            throw ToolError.message("not a GitHub URL")
         }
         let parts = url.path.split(separator: "/").map(String.init)
         guard parts.count >= 2 else {
-            throw fail("GitHub URL has no owner or repo")
+            throw ToolError.message("GitHub URL has no owner or repo")
         }
         owner = parts[0]
         repo = parts[1].hasSuffix(".git") ? String(parts[1].dropLast(4)) : parts[1]

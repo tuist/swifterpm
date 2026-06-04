@@ -14,14 +14,14 @@ struct ResolvedPin: Codable, Equatable, Sendable {
 
     func revision() throws -> String {
         guard let revision = state.revision else {
-            throw fail("\(identity) does not have a source-control revision")
+            throw ToolError.message("\(identity) does not have a source-control revision")
         }
         return revision
     }
 
     func versionString() throws -> String {
         guard let version = state.version else {
-            throw fail("\(identity) does not have a resolved version")
+            throw ToolError.message("\(identity) does not have a resolved version")
         }
         return version
     }
@@ -74,7 +74,7 @@ func checkoutDirectoryName(_ pin: ResolvedPin) -> String {
 func registryIdentityParts(_ identity: String) throws -> (String, String) {
     let parts = identity.split(separator: ".", maxSplits: 1).map(String.init)
     guard parts.count == 2 else {
-        throw fail("\(identity) is not a scoped registry package identity")
+        throw ToolError.message("\(identity) is not a scoped registry package identity")
     }
     return (parts[0], parts[1])
 }

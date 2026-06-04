@@ -1,4 +1,4 @@
-load("@build_bazel_rules_swift//swift:swift.bzl", "swift_binary", "swift_library")
+load("@build_bazel_rules_swift//swift:swift.bzl", "swift_binary", "swift_library", "swift_test")
 load("@rules_apple//apple:macos.bzl", "macos_command_line_application")
 load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
 
@@ -7,7 +7,21 @@ swift_library(
     srcs = glob([
         "Sources/swifterpm/*.swift",
     ]),
-    visibility = ["//visibility:private"],
+    deps = ["@swift_argument_parser//:ArgumentParser"],
+    visibility = ["//visibility:public"],
+)
+
+swift_test(
+    name = "swifterpm_tests",
+    discover_tests = False,
+    srcs = glob(
+        [
+            "Sources/swifterpm/*.swift",
+            "Tests/swifterpmTests/*.swift",
+        ],
+        exclude = ["Sources/swifterpm/main.swift"],
+    ),
+    deps = ["@swift_argument_parser//:ArgumentParser"],
 )
 
 swift_binary(
@@ -15,6 +29,7 @@ swift_binary(
     srcs = glob([
         "Sources/swifterpm/*.swift",
     ]),
+    deps = ["@swift_argument_parser//:ArgumentParser"],
     visibility = ["//visibility:public"],
 )
 

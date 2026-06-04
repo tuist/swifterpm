@@ -74,13 +74,13 @@ func parseManifestDependencies(_ manifest: Any) throws -> [ManifestDependency] {
         if let sourceControl = item["sourceControl"] as? [[String: Any]] {
             for dependency in sourceControl {
                 guard let identity = dependency["identity"] as? String else {
-                    throw fail("sourceControl dependency is missing identity")
+                    throw ToolError.message("sourceControl dependency is missing identity")
                 }
                 guard let location = parseSourceControlLocation(dependency) else {
-                    throw fail("\(identity) is missing source-control location")
+                    throw ToolError.message("\(identity) is missing source-control location")
                 }
                 guard let requirementJSON = dependency["requirement"] else {
-                    throw fail("\(identity) is missing requirement")
+                    throw ToolError.message("\(identity) is missing requirement")
                 }
                 dependencies.append(ManifestDependency(
                     identity: identity,
@@ -94,10 +94,10 @@ func parseManifestDependencies(_ manifest: Any) throws -> [ManifestDependency] {
         if let registry = item["registry"] as? [[String: Any]] {
             for dependency in registry {
                 guard let identity = dependency["identity"] as? String else {
-                    throw fail("registry dependency is missing identity")
+                    throw ToolError.message("registry dependency is missing identity")
                 }
                 guard let requirementJSON = dependency["requirement"] else {
-                    throw fail("\(identity) is missing requirement")
+                    throw ToolError.message("\(identity) is missing requirement")
                 }
                 dependencies.append(ManifestDependency(
                     identity: identity,
@@ -231,10 +231,10 @@ func parseManifestFileSystemDependencies(_ manifest: Any) throws -> [ManifestFil
         guard let fileSystem = item["fileSystem"] as? [[String: Any]] else { continue }
         for dependency in fileSystem {
             guard let identity = dependency["identity"] as? String else {
-                throw fail("fileSystem dependency is missing identity")
+                throw ToolError.message("fileSystem dependency is missing identity")
             }
             guard let path = dependency["path"] as? String else {
-                throw fail("\(identity) is missing path")
+                throw ToolError.message("\(identity) is missing path")
             }
             dependencies.append(ManifestFileSystemDependency(
                 identity: identity,
@@ -248,7 +248,7 @@ func parseManifestFileSystemDependencies(_ manifest: Any) throws -> [ManifestFil
 
 func parseRequirement(_ requirement: Any) throws -> Requirement {
     guard let requirement = requirement as? [String: Any] else {
-        throw fail("unsupported requirement shape: \(requirement)")
+        throw ToolError.message("unsupported requirement shape: \(requirement)")
     }
     if let exact = requirement["exact"] as? [String], let value = exact.first {
         return .exact(try SemVer(value))
@@ -257,7 +257,7 @@ func parseRequirement(_ requirement: Any) throws -> Requirement {
         guard let lower = first["lowerBound"] as? String,
               let upper = first["upperBound"] as? String
         else {
-            throw fail("range is missing lowerBound or upperBound")
+            throw ToolError.message("range is missing lowerBound or upperBound")
         }
         return .range(lower: try SemVer(lower), upper: try SemVer(upper))
     }
@@ -267,7 +267,7 @@ func parseRequirement(_ requirement: Any) throws -> Requirement {
     if let branch = requirement["branch"] as? [String], let value = branch.first {
         return .branch(value)
     }
-    throw fail("unsupported requirement shape: \(requirement)")
+    throw ToolError.message("unsupported requirement shape: \(requirement)")
 }
 
 func versionRange(for requirement: Requirement) -> VersionRange? {

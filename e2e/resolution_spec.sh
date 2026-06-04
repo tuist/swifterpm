@@ -19,6 +19,33 @@ FIREFOX_IOS_MANIFEST_PATH="Package.swift"
 
 SWIFTPM_FIXTURES="${PWD}/e2e/fixtures/swiftpm/DependencyResolution/External"
 
+prepare_isolated_state() {
+  local tmp="$1"
+
+  mkdir -p \
+    "${tmp}/home" \
+    "${tmp}/tmp" \
+    "${tmp}/xdg-cache" \
+    "${tmp}/xdg-config" \
+    "${tmp}/xdg-data"
+}
+
+scoped_env() {
+  local tmp="$1"
+  shift
+
+  env \
+    HOME="${tmp}/home" \
+    USERPROFILE="${tmp}/home" \
+    TMPDIR="${tmp}/tmp" \
+    XDG_CACHE_HOME="${tmp}/xdg-cache" \
+    XDG_CONFIG_HOME="${tmp}/xdg-config" \
+    XDG_DATA_HOME="${tmp}/xdg-data" \
+    GIT_CONFIG_GLOBAL=/dev/null \
+    GIT_CONFIG_NOSYSTEM=1 \
+    "$@"
+}
+
 isolated_workspace() {
   # Stand up a temp tree with the manifest copied in. Returns the package
   # directory on stdout. Caller is responsible for the RETURN trap that
@@ -51,30 +78,33 @@ copy_swiftpm_fixture() {
 }
 
 init_git_package() {
-  local package_dir="$1"
+  local tmp="$1"
+  local package_dir="$2"
 
-  git -C "${package_dir}" init >/dev/null
-  git -C "${package_dir}" checkout -B main >/dev/null 2>&1
-  git -C "${package_dir}" config user.email "swifterpm-e2e@example.com"
-  git -C "${package_dir}" config user.name "swifterpm e2e"
-  git -C "${package_dir}" add .
-  git -C "${package_dir}" commit -m "Initial import" >/dev/null
+  scoped_env "${tmp}" git -C "${package_dir}" -c init.defaultBranch=main init >/dev/null
+  scoped_env "${tmp}" git -C "${package_dir}" checkout -B main >/dev/null 2>&1
+  scoped_env "${tmp}" git -C "${package_dir}" config user.email "swifterpm-e2e@example.com"
+  scoped_env "${tmp}" git -C "${package_dir}" config user.name "swifterpm e2e"
+  scoped_env "${tmp}" git -C "${package_dir}" add .
+  scoped_env "${tmp}" git -C "${package_dir}" commit -m "Initial import" >/dev/null
 }
 
 tag_git_package() {
-  local package_dir="$1"
-  shift
+  local tmp="$1"
+  local package_dir="$2"
+  shift 2
 
   local tag
   for tag in "$@"; do
-    git -C "${package_dir}" tag "${tag}"
+    scoped_env "${tmp}" git -C "${package_dir}" tag "${tag}"
   done
 }
 
 resolve_package() {
-  local package_dir="$1"
-  local cache_dir="$2"
-  "${SWIFTERPM_BIN}" \
+  local tmp="$1"
+  local package_dir="$2"
+  local cache_dir="$3"
+  scoped_env "${tmp}" "${SWIFTERPM_BIN}" \
     --package-path "${package_dir}" \
     --scratch-path "${package_dir}/.build" \
     --cache-path "${cache_dir}" \
@@ -84,9 +114,10 @@ resolve_package() {
 }
 
 swiftpm_accepts_lockfile() {
-  local package_dir="$1"
-  local cache_dir="$2"
-  swift package \
+  local tmp="$1"
+  local package_dir="$2"
+  local cache_dir="$3"
+  scoped_env "${tmp}" swift package \
     --package-path "${package_dir}" \
     --scratch-path "${cache_dir}/scratch" \
     --cache-path "${cache_dir}" \
@@ -118,6 +149,7 @@ scenario_resolves_firefox_ios() {
   local tmp
   tmp="$(mktemp -d)"
   trap 'rm -rf "${tmp}"' RETURN
+  prepare_isolated_state "${tmp}"
 
   local package_dir
   package_dir="$(isolated_workspace \
@@ -126,8 +158,8 @@ scenario_resolves_firefox_ios() {
     "${FIREFOX_IOS_MANIFEST_PATH}" \
     "${tmp}")" || return 1
 
-  resolve_package "${package_dir}" "${tmp}/cache" || return 1
-  swiftpm_accepts_lockfile "${package_dir}" "${tmp}/swift-cache" || return 1
+  resolve_package "${tmp}" "${package_dir}" "${tmp}/cache" || return 1
+  swiftpm_accepts_lockfile "${tmp}" "${package_dir}" "${tmp}/swift-cache" || return 1
 
   echo "pins=$(pin_count "${package_dir}")"
   echo "force-resolve=ok"
@@ -137,6 +169,7 @@ scenario_resolves_pocket_casts_ios() {
   local tmp
   tmp="$(mktemp -d)"
   trap 'rm -rf "${tmp}"' RETURN
+  prepare_isolated_state "${tmp}"
 
   local package_dir
   package_dir="$(isolated_workspace \
@@ -145,8 +178,8 @@ scenario_resolves_pocket_casts_ios() {
     "${POCKET_CASTS_MANIFEST_PATH}" \
     "${tmp}")" || return 1
 
-  resolve_package "${package_dir}" "${tmp}/cache" || return 1
-  swiftpm_accepts_lockfile "${package_dir}" "${tmp}/swift-cache" || return 1
+  resolve_package "${tmp}" "${package_dir}" "${tmp}/cache" || return 1
+  swiftpm_accepts_lockfile "${tmp}" "${package_dir}" "${tmp}/swift-cache" || return 1
 
   echo "pins=$(pin_count "${package_dir}")"
   echo "force-resolve=ok"
@@ -156,16 +189,17 @@ scenario_resolves_swiftpm_external_simple() {
   local tmp
   tmp="$(mktemp -d)"
   trap 'rm -rf "${tmp}"' RETURN
+  prepare_isolated_state "${tmp}"
 
   local fixture_dir
   fixture_dir="$(copy_swiftpm_fixture "Simple" "${tmp}")" || return 1
 
-  init_git_package "${fixture_dir}/Foo" || return 1
-  tag_git_package "${fixture_dir}/Foo" "1.0.0" "1.1.0" "1.2.0" "1.2.3" || return 1
+  init_git_package "${tmp}" "${fixture_dir}/Foo" || return 1
+  tag_git_package "${tmp}" "${fixture_dir}/Foo" "1.0.0" "1.1.0" "1.2.0" "1.2.3" || return 1
 
   local package_dir="${fixture_dir}/Bar"
-  resolve_package "${package_dir}" "${tmp}/cache" || return 1
-  swiftpm_accepts_lockfile "${package_dir}" "${tmp}/swift-cache" || return 1
+  resolve_package "${tmp}" "${package_dir}" "${tmp}/cache" || return 1
+  swiftpm_accepts_lockfile "${tmp}" "${package_dir}" "${tmp}/swift-cache" || return 1
 
   echo "pins=$(pin_count "${package_dir}")"
   echo "foo-version=$(pin_state_value "${package_dir}" "foo" "version")"
@@ -176,19 +210,20 @@ scenario_resolves_swiftpm_external_complex() {
   local tmp
   tmp="$(mktemp -d)"
   trap 'rm -rf "${tmp}"' RETURN
+  prepare_isolated_state "${tmp}"
 
   local fixture_dir
   fixture_dir="$(copy_swiftpm_fixture "Complex" "${tmp}")" || return 1
 
   local package
   for package in "FisherYates" "PlayingCard" "deck-of-playing-cards"; do
-    init_git_package "${fixture_dir}/${package}" || return 1
-    tag_git_package "${fixture_dir}/${package}" "1.0.0" || return 1
+    init_git_package "${tmp}" "${fixture_dir}/${package}" || return 1
+    tag_git_package "${tmp}" "${fixture_dir}/${package}" "1.0.0" || return 1
   done
 
   local package_dir="${fixture_dir}/app"
-  resolve_package "${package_dir}" "${tmp}/cache" || return 1
-  swiftpm_accepts_lockfile "${package_dir}" "${tmp}/swift-cache" || return 1
+  resolve_package "${tmp}" "${package_dir}" "${tmp}/cache" || return 1
+  swiftpm_accepts_lockfile "${tmp}" "${package_dir}" "${tmp}/swift-cache" || return 1
 
   echo "pins=$(pin_count "${package_dir}")"
   echo "identities=$(resolved_identities "${package_dir}")"
@@ -199,15 +234,16 @@ scenario_resolves_swiftpm_branch_dependency() {
   local tmp
   tmp="$(mktemp -d)"
   trap 'rm -rf "${tmp}"' RETURN
+  prepare_isolated_state "${tmp}"
 
   local fixture_dir
   fixture_dir="$(copy_swiftpm_fixture "Branch" "${tmp}")" || return 1
 
-  init_git_package "${fixture_dir}/Foo" || return 1
+  init_git_package "${tmp}" "${fixture_dir}/Foo" || return 1
 
   local package_dir="${fixture_dir}/Bar"
-  resolve_package "${package_dir}" "${tmp}/cache" || return 1
-  swiftpm_accepts_lockfile "${package_dir}" "${tmp}/swift-cache" || return 1
+  resolve_package "${tmp}" "${package_dir}" "${tmp}/cache" || return 1
+  swiftpm_accepts_lockfile "${tmp}" "${package_dir}" "${tmp}/swift-cache" || return 1
 
   local revision
   revision="$(pin_state_value "${package_dir}" "foo" "revision")"
@@ -223,13 +259,14 @@ scenario_resolves_swiftpm_local_case_insensitive_dependency() {
   local tmp
   tmp="$(mktemp -d)"
   trap 'rm -rf "${tmp}"' RETURN
+  prepare_isolated_state "${tmp}"
 
   local fixture_dir
   fixture_dir="$(copy_swiftpm_fixture "PackageLookupCaseInsensitive" "${tmp}")" || return 1
 
   local package_dir="${fixture_dir}/pkg"
-  resolve_package "${package_dir}" "${tmp}/cache" || return 1
-  swiftpm_accepts_lockfile "${package_dir}" "${tmp}/swift-cache" || return 1
+  resolve_package "${tmp}" "${package_dir}" "${tmp}/cache" || return 1
+  swiftpm_accepts_lockfile "${tmp}" "${package_dir}" "${tmp}/swift-cache" || return 1
 
   echo "pins=$(pin_count "${package_dir}")"
   echo "force-resolve=ok"

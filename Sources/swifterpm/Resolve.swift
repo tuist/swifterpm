@@ -110,12 +110,13 @@ private final class NativeDependencyProvider {
             constraints[package, default: []].append(range)
             queue.append(package)
         }
+        try await prefetchVersions(rootDependencies.map(\.0))
 
         var iterations = 0
         while !queue.isEmpty {
             iterations += 1
             if iterations > 10_000 {
-                throw fail("dependency resolution exceeded iteration limit")
+                throw ToolError.message("dependency resolution exceeded iteration limit")
             }
 
             let package = queue.removeFirst()
@@ -125,7 +126,7 @@ private final class NativeDependencyProvider {
                 ranges.allSatisfy { $0.contains(version.version) }
             }
             guard let chosen = matching.first(where: { $0.version.prerelease.isEmpty }) ?? matching.first else {
-                throw fail("no versions found for \(package) matching constraints")
+                throw ToolError.message("no versions found for \(package) matching constraints")
             }
 
             if selected[package]?.version == chosen.version {
@@ -134,21 +135,56 @@ private final class NativeDependencyProvider {
             selected[package] = chosen
 
             let transitives = try await dependenciesFor(package: package, version: chosen.version)
+            var discoveredPackages: [PackageKey] = []
             for (dependency, range) in transitives {
                 let existing = constraints[dependency, default: []]
                 if !existing.contains(range) {
                     constraints[dependency] = existing + [range]
                     queue.append(dependency)
+                    discoveredPackages.append(dependency)
                 }
             }
+            try await prefetchVersions(discoveredPackages)
         }
 
         var pins: [ResolvedPin] = []
         for (package, resolvedVersion) in selected where package != .root {
-            pins.append(try await pinForVersion(package: package, version: resolvedVersion.version))
+            pins.append(try pinForResolvedVersion(package: package, resolvedVersion: resolvedVersion))
         }
         pins.append(contentsOf: fixedPins.values)
         return pins
+    }
+
+    private func prefetchVersions(_ packages: [PackageKey]) async throws {
+        let missing = Array(Set(packages)).filter { versions[$0] == nil }
+        if missing.isEmpty {
+            return
+        }
+
+        let fetched = try await withThrowingTaskGroup(of: (PackageKey, [ResolvedVersion]).self) { group in
+            for package in missing {
+                let cache = cache
+                let registryConfig = registryConfig
+                group.addTask {
+                    let versions = try await Self.fetchResolvedVersions(
+                        package: package,
+                        cache: cache,
+                        registryConfig: registryConfig
+                    )
+                    return (package, versions)
+                }
+            }
+
+            var result: [(PackageKey, [ResolvedVersion])] = []
+            for try await item in group {
+                result.append(item)
+            }
+            return result
+        }
+
+        for (package, resolved) in fetched where versions[package] == nil {
+            versions[package] = resolved
+        }
     }
 
     private func resolvedVersions(_ package: PackageKey) async throws -> [ResolvedVersion] {
@@ -156,6 +192,20 @@ private final class NativeDependencyProvider {
             return cached
         }
 
+        let resolved = try await Self.fetchResolvedVersions(
+            package: package,
+            cache: cache,
+            registryConfig: registryConfig
+        )
+        versions[package] = resolved
+        return resolved
+    }
+
+    private static func fetchResolvedVersions(
+        package: PackageKey,
+        cache: Cache,
+        registryConfig: RegistryConfig
+    ) async throws -> [ResolvedVersion] {
         var resolved: [ResolvedVersion]
         switch package.kind {
         case .root:
@@ -174,7 +224,6 @@ private final class NativeDependencyProvider {
             }
         }
         resolved.sort { $0.version < $1.version }
-        versions[package] = resolved
         return resolved
     }
 
@@ -208,7 +257,7 @@ private final class NativeDependencyProvider {
         let pin = try await pinForVersion(package: package, version: version)
         switch package.kind {
         case .root:
-            throw fail("root package cannot be materialized")
+            throw ToolError.message("root package cannot be materialized")
         case .sourceControl:
             return try await ensureSource(cache: cache, pin: pin)
         case .registry:
@@ -228,13 +277,13 @@ private final class NativeDependencyProvider {
     private func pinForVersion(package: PackageKey, version: SemVer) async throws -> ResolvedPin {
         switch package.kind {
         case .root:
-            throw fail("root package has no pin")
+            throw ToolError.message("root package has no pin")
         case .sourceControl:
             let versions = try await resolvedVersions(package)
             guard let resolvedVersion = versions.first(where: { $0.version == version }),
                   let revision = resolvedVersion.revision
             else {
-                throw fail("version \(version) was not found for \(package.identity)")
+                throw ToolError.message("version \(version) was not found for \(package.identity)")
             }
             return ResolvedPin(
                 identity: package.identity,
@@ -251,11 +300,35 @@ private final class NativeDependencyProvider {
             )
         }
     }
+
+    private func pinForResolvedVersion(package: PackageKey, resolvedVersion: ResolvedVersion) throws -> ResolvedPin {
+        switch package.kind {
+        case .root:
+            throw ToolError.message("root package has no pin")
+        case .sourceControl:
+            guard let revision = resolvedVersion.revision else {
+                throw ToolError.message("version \(resolvedVersion.version) was not found for \(package.identity)")
+            }
+            return ResolvedPin(
+                identity: package.identity,
+                kind: sourceControlKind(location: package.location),
+                location: package.location,
+                state: ResolvedState(branch: nil, revision: revision, version: resolvedVersion.version.description)
+            )
+        case .registry:
+            return ResolvedPin(
+                identity: package.identity,
+                kind: "registry",
+                location: "",
+                state: ResolvedState(branch: nil, revision: nil, version: resolvedVersion.version.description)
+            )
+        }
+    }
 }
 
 private func resolveUnversionedDependency(_ dependency: ManifestDependency) throws -> ResolvedPin {
     if dependency.kind == .registry {
-        throw fail("registry dependencies do not support branch or revision requirements")
+        throw ToolError.message("registry dependencies do not support branch or revision requirements")
     }
 
     let state: ResolvedState
@@ -269,7 +342,7 @@ private func resolveUnversionedDependency(_ dependency: ManifestDependency) thro
             version: nil
         )
     case .exact, .range:
-        throw fail("internal error: versioned requirement reached unversioned resolver")
+        throw ToolError.message("internal error: versioned requirement reached unversioned resolver")
     }
 
     return ResolvedPin(
