@@ -3,42 +3,40 @@ import Testing
 
 struct RegistryTests {
     @Test
-    func loadUsesProvidedDefaultRegistryURL() throws {
-        let root = try makeTemporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: root) }
+    func loadUsesProvidedDefaultRegistryURL() async throws {
+        try await withTemporaryDirectory { root in
+            let config = try await RegistryConfig.load(
+                packageDir: root,
+                configPath: nil,
+                defaultRegistryURL: "https://registry.example.com"
+            )
 
-        let config = try RegistryConfig.load(
-            packageDir: root,
-            configPath: nil,
-            defaultRegistryURL: "https://registry.example.com"
-        )
-
-        #expect(try config.registryURL(for: uniqueRegistryIdentity()).absoluteString == "https://registry.example.com")
+            #expect(try config.registryURL(for: uniqueRegistryIdentity()).absoluteString == "https://registry.example.com")
+        }
     }
 
     @Test
-    func loadReadsPackageScopedRegistryConfig() throws {
-        let root = try makeTemporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: root) }
-
-        let scope = uniqueRegistryScope()
-        let registries = root.appendingPathComponent(".swiftpm/configuration/registries.json")
-        try atomicWrite(
-            """
-            {
-              "registries": {
-                "\(scope)": {
-                  "url": "https://\(scope).example.com"
+    func loadReadsPackageScopedRegistryConfig() async throws {
+        try await withTemporaryDirectory { root in
+            let scope = uniqueRegistryScope()
+            let registries = root.appendingPathComponent(".swiftpm/configuration/registries.json")
+            try await atomicWrite(
+                """
+                {
+                  "registries": {
+                    "\(scope)": {
+                      "url": "https://\(scope).example.com"
+                    }
+                  }
                 }
-              }
-            }
-            """,
-            to: registries
-        )
+                """,
+                to: registries
+            )
 
-        let config = try RegistryConfig.load(packageDir: root, configPath: nil, defaultRegistryURL: nil)
+            let config = try await RegistryConfig.load(packageDir: root, configPath: nil, defaultRegistryURL: nil)
 
-        #expect(try config.registryURL(for: "\(scope).package").absoluteString == "https://\(scope).example.com")
+            #expect(try config.registryURL(for: "\(scope).package").absoluteString == "https://\(scope).example.com")
+        }
     }
 
     @Test

@@ -3,24 +3,36 @@ import Foundation
 struct Cache: Sendable {
     let root: URL
 
-    init(root: URL?) throws {
+    init(root: URL?) async throws {
         if let root {
             self.root = root
         } else {
             self.root = try Cache.defaultRoot()
         }
-        for path in [
+        let cacheRoot = self.root
+        let topLevelPaths = [
             "sources",
             "archives",
+            "registry",
+            "metadata",
+            "locks",
+            "virtual",
+        ]
+        try await parallelForEach(topLevelPaths) { path in
+            try await AsyncFileSystem.createDirectory(
+                at: cacheRoot.appendingPathComponent(path),
+                withIntermediateDirectories: true
+            )
+        }
+        try await parallelForEach([
             "registry/archives",
             "metadata/remotes",
             "metadata/registries",
-            "locks",
             "virtual/checkouts",
-        ] {
-            try FileManager.default.createDirectory(
-                at: self.root.appendingPathComponent(path),
-                withIntermediateDirectories: true
+        ]) { path in
+            try await AsyncFileSystem.createDirectory(
+                at: cacheRoot.appendingPathComponent(path),
+                withIntermediateDirectories: false
             )
         }
     }
@@ -63,8 +75,10 @@ struct Cache: Sendable {
             .appendingPathComponent("\(stableHash(registryURL))-\(stableHash(identity)).json")
     }
 
-    func lock(namespace: String, key: String) throws -> PathLock {
-        try PathLock(path: root.appendingPathComponent("locks").appendingPathComponent(namespace).appendingPathComponent("\(stableHash(key)).lock"))
+    func lock(namespace: String, key: String) async throws -> PathLock {
+        try await pathLock(
+            at: root.appendingPathComponent("locks").appendingPathComponent(namespace).appendingPathComponent("\(stableHash(key)).lock")
+        )
     }
 
     private static func defaultRoot() throws -> URL {

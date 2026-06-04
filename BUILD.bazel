@@ -7,12 +7,16 @@ swift_library(
     srcs = glob([
         "Sources/swifterpm/*.swift",
     ]),
-    deps = ["@swift_argument_parser//:ArgumentParser"],
+    deps = [
+        "@swift_argument_parser//:ArgumentParser",
+        "@swiftpkg_swift_nio//:_NIOFileSystem",
+    ],
     visibility = ["//visibility:public"],
 )
 
 swift_test(
     name = "swifterpm_tests",
+    data = glob(["Tests/swifterpmTests/Fixtures/**"]),
     discover_tests = False,
     srcs = glob(
         [
@@ -21,7 +25,10 @@ swift_test(
         ],
         exclude = ["Sources/swifterpm/main.swift"],
     ),
-    deps = ["@swift_argument_parser//:ArgumentParser"],
+    deps = [
+        "@swift_argument_parser//:ArgumentParser",
+        "@swiftpkg_swift_nio//:_NIOFileSystem",
+    ],
 )
 
 swift_binary(
@@ -29,7 +36,10 @@ swift_binary(
     srcs = glob([
         "Sources/swifterpm/*.swift",
     ]),
-    deps = ["@swift_argument_parser//:ArgumentParser"],
+    deps = [
+        "@swift_argument_parser//:ArgumentParser",
+        "@swiftpkg_swift_nio//:_NIOFileSystem",
+    ],
     visibility = ["//visibility:public"],
 )
 

@@ -27,13 +27,13 @@ enum Requirement: Sendable {
 
 let manifestCacheFile = ".swifterpm-manifest.json"
 
-func dumpPackage(packageDir: URL, disableSandbox: Bool) throws -> Any {
-    let data = try dumpPackageJSON(packageDir: packageDir, disableSandbox: disableSandbox)
+func dumpPackage(packageDir: URL, disableSandbox: Bool) async throws -> Any {
+    let data = try await dumpPackageJSON(packageDir: packageDir, disableSandbox: disableSandbox)
     return try JSONSerialization.jsonObject(with: data)
 }
 
-func dumpPackageJSON(packageDir: URL, disableSandbox: Bool) throws -> Data {
-    if let cached = try readCachedManifest(packageDir: packageDir) {
+func dumpPackageJSON(packageDir: URL, disableSandbox: Bool) async throws -> Data {
+    if let cached = try await readCachedManifest(packageDir: packageDir) {
         return cached
     }
 
@@ -42,24 +42,22 @@ func dumpPackageJSON(packageDir: URL, disableSandbox: Bool) throws -> Data {
         args.append("--disable-sandbox")
     }
     args.append("dump-package")
-    let result = try runCommand("/usr/bin/swift", args, workingDirectory: packageDir)
-    try? atomicWrite(result.stdout, to: packageDir.appendingPathComponent(manifestCacheFile))
+    let result = try await runCommandAsync("/usr/bin/swift", args, workingDirectory: packageDir)
+    try? await atomicWrite(result.stdout, to: packageDir.appendingPathComponent(manifestCacheFile))
     return result.stdout
 }
 
-private func readCachedManifest(packageDir: URL) throws -> Data? {
+private func readCachedManifest(packageDir: URL) async throws -> Data? {
     let cache = packageDir.appendingPathComponent(manifestCacheFile)
     let manifest = packageDir.appendingPathComponent("Package.swift")
-    guard FileManager.default.fileExists(atPath: cache.path) else { return nil }
-    let cacheAttrs = try FileManager.default.attributesOfItem(atPath: cache.path)
-    let manifestAttrs = try FileManager.default.attributesOfItem(atPath: manifest.path)
-    guard let cacheDate = cacheAttrs[.modificationDate] as? Date,
-          let manifestDate = manifestAttrs[.modificationDate] as? Date,
+    guard try await AsyncFileSystem.exists(cache) else { return nil }
+    guard let cacheDate = try await AsyncFileSystem.modificationDate(cache),
+          let manifestDate = try await AsyncFileSystem.modificationDate(manifest),
           cacheDate >= manifestDate
     else {
         return nil
     }
-    return try Data(contentsOf: cache)
+    return try await AsyncFileSystem.readData(from: cache)
 }
 
 func parseManifestDependencies(_ manifest: Any) throws -> [ManifestDependency] {

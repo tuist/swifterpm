@@ -33,16 +33,16 @@ struct ResolvedState: Codable, Equatable, Sendable {
     var version: String?
 }
 
-func readResolvedFile(packageDir: URL) throws -> ResolvedPins {
-    let data = try Data(contentsOf: packageDir.appendingPathComponent("Package.resolved"))
+func readResolvedFile(packageDir: URL) async throws -> ResolvedPins {
+    let data = try await AsyncFileSystem.readData(from: packageDir.appendingPathComponent("Package.resolved"))
     return try JSONDecoder().decode(ResolvedPins.self, from: data)
 }
 
-func writeResolvedFile(packageDir: URL, resolved: ResolvedPins) throws {
+func writeResolvedFile(packageDir: URL, resolved: ResolvedPins) async throws {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
     let data = try encoder.encode(resolved) + Data("\n".utf8)
-    try atomicWrite(data, to: packageDir.appendingPathComponent("Package.resolved"))
+    try await atomicWrite(data, to: packageDir.appendingPathComponent("Package.resolved"))
 }
 
 func printResolution(_ resolved: ResolvedPins) {

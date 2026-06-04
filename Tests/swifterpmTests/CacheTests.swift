@@ -3,11 +3,9 @@ import Testing
 
 struct CacheTests {
     @Test
-    func cachePathsStayUnderProvidedRoot() throws {
-        let root = try makeTemporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: root) }
-
-        let cache = try Cache(root: root)
+    func cachePathsStayUnderProvidedRoot() async throws {
+        try await withTemporaryDirectory { root in
+            let cache = try await Cache(root: root)
         let pin = ResolvedPin(
             identity: "foo",
             kind: "remoteSourceControl",
@@ -24,14 +22,13 @@ struct CacheTests {
         #expect(cache.remoteVersionsPath(location: pin.location).path.hasPrefix(root.path))
         #expect(cache.registryArchivePath(identity: "example.package", version: "1.2.3").path.hasPrefix(root.path))
         #expect(cache.registryVersionsPath(registryURL: "https://registry.example.com", identity: "example.package").path.hasPrefix(root.path))
+        }
     }
 
     @Test
-    func initializesExpectedCacheDirectories() throws {
-        let root = try makeTemporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: root) }
-
-        _ = try Cache(root: root)
+    func initializesExpectedCacheDirectories() async throws {
+        try await withTemporaryDirectory { root in
+            _ = try await Cache(root: root)
 
         for path in [
             "sources",
@@ -42,25 +39,25 @@ struct CacheTests {
             "locks",
             "virtual/checkouts",
         ] {
-            #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent(path).path))
+                #expect(try await AsyncFileSystem.exists(root.appendingPathComponent(path)))
+            }
         }
     }
 
     @Test
-    func registrySourcePathRequiresResolvedVersion() throws {
-        let root = try makeTemporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: root) }
+    func registrySourcePathRequiresResolvedVersion() async throws {
+        try await withTemporaryDirectory { root in
+            let cache = try await Cache(root: root)
+            let pin = ResolvedPin(
+                identity: "example.package",
+                kind: "registry",
+                location: "",
+                state: ResolvedState(branch: nil, revision: nil, version: nil)
+            )
 
-        let cache = try Cache(root: root)
-        let pin = ResolvedPin(
-            identity: "example.package",
-            kind: "registry",
-            location: "",
-            state: ResolvedState(branch: nil, revision: nil, version: nil)
-        )
-
-        #expect(throws: (any Error).self) {
-            try cache.sourcePath(pin: pin)
+            #expect(throws: (any Error).self) {
+                try cache.sourcePath(pin: pin)
+            }
         }
     }
 }
