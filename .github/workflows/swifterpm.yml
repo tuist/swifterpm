@@ -28,7 +28,7 @@ jobs:
           install_args: bazel
 
       - name: Run unit tests
-        run: mise run test:unit
+        run: ./mise/tasks/test/unit.sh
 
   e2e:
     name: e2e
@@ -44,7 +44,9 @@ jobs:
           install_args: bazel shellspec jq
 
       - name: Run e2e tests
-        run: mise run test:e2e
+        env:
+          SHELLSPEC_JOBS: "6"
+        run: ./mise/tasks/test/e2e.sh
 
   build:
     name: build

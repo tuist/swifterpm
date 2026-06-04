@@ -4,8 +4,9 @@ set -euo pipefail
 
 bazel build //:swifterpm
 shellspec_args=(--shell bash)
-if [[ -n "${SHELLSPEC_JOBS:-}" ]]; then
-  shellspec_args+=(--jobs "${SHELLSPEC_JOBS}")
+shellspec_jobs="${SHELLSPEC_JOBS:-6}"
+if [[ "${shellspec_jobs}" != "0" ]]; then
+  shellspec_args+=(--jobs "${shellspec_jobs}")
 fi
 
 SWIFTERPM_BIN="${PWD}/bazel-bin/swifterpm" shellspec "${shellspec_args[@]}" e2e
