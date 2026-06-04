@@ -43,7 +43,8 @@ enum PackageResolver {
         packageDir: URL,
         cache: Cache,
         registryConfig: RegistryConfig,
-        disableSandbox: Bool
+        disableSandbox: Bool,
+        progress: ResolutionProgressReporter? = nil
     ) async throws -> ResolvedPins {
         let manifest = try await ManifestLoader.dumpPackage(
             packageDir: packageDir, disableSandbox: disableSandbox)
@@ -56,6 +57,14 @@ enum PackageResolver {
         var fixedPins: [ResolvedPin] = []
         var rootDependencies: [(PackageKey, VersionRange)] = []
         var rootDirectPackages = Set<PackageKey>()
+        progress?.started(
+            rootVersionedDependencies: dependencies.filter {
+                ManifestParser.versionRange(for: $0.requirement) != nil
+            }.count,
+            fixedDependencies: dependencies.filter {
+                ManifestParser.versionRange(for: $0.requirement) == nil
+            }.count
+        )
 
         for dependency in dependencies {
             if let range = ManifestParser.versionRange(for: dependency.requirement) {
@@ -63,7 +72,10 @@ enum PackageResolver {
                 rootDirectPackages.insert(package)
                 rootDependencies.append((package, range))
             } else {
-                fixedPins.append(try await resolveUnversionedDependency(dependency))
+                progress?.startedResolvingFixedPin(package: dependency.identity)
+                let pin = try await resolveUnversionedDependency(dependency)
+                progress?.finishedResolvingFixedPin(package: dependency.identity)
+                fixedPins.append(pin)
             }
         }
 
@@ -71,12 +83,14 @@ enum PackageResolver {
             cache: cache,
             registryConfig: registryConfig,
             disableSandbox: disableSandbox,
-            rootDirectPackages: rootDirectPackages
+            rootDirectPackages: rootDirectPackages,
+            progress: progress
         )
         var pins = try await provider.solve(rootDependencies: rootDependencies)
         pins.append(contentsOf: fixedPins)
         pins = dedupePinsByIdentity(pins)
         pins.sort { $0.identity < $1.identity }
+        progress?.finished(pinCount: pins.count)
 
         return ResolvedPins(
             originHash: originHash,
@@ -90,6 +104,7 @@ enum PackageResolver {
         let registryConfig: RegistryConfig
         let disableSandbox: Bool
         let rootDirectPackages: Set<PackageKey>
+        let progress: ResolutionProgressReporter?
 
         private var versions: [PackageKey: [ResolvedVersion]] = [:]
         private var dependencies: [String: [(PackageKey, VersionRange)]] = [:]
@@ -97,12 +112,14 @@ enum PackageResolver {
 
         init(
             cache: Cache, registryConfig: RegistryConfig, disableSandbox: Bool,
-            rootDirectPackages: Set<PackageKey>
+            rootDirectPackages: Set<PackageKey>,
+            progress: ResolutionProgressReporter?
         ) {
             self.cache = cache
             self.registryConfig = registryConfig
             self.disableSandbox = disableSandbox
             self.rootDirectPackages = rootDirectPackages
+            self.progress = progress
             versions[.root] = [
                 ResolvedVersion(version: SemVer(major: 0, minor: 0, patch: 0), revision: nil)
             ]
@@ -143,6 +160,7 @@ enum PackageResolver {
                     continue
                 }
                 selected[package] = chosen
+                progress?.selected(package: package.identity, version: chosen.version.description)
 
                 let transitives = try await dependenciesFor(
                     package: package, version: chosen.version)
@@ -180,11 +198,17 @@ enum PackageResolver {
                 for package in missing {
                     let cache = cache
                     let registryConfig = registryConfig
+                    let progress = progress
                     group.addTask {
+                        progress?.startedFetchingVersions(package: package.identity)
                         let versions = try await Self.fetchResolvedVersions(
                             package: package,
                             cache: cache,
                             registryConfig: registryConfig
+                        )
+                        progress?.finishedFetchingVersions(
+                            package: package.identity,
+                            versionCount: versions.count
                         )
                         return (package, versions)
                     }
@@ -252,6 +276,8 @@ enum PackageResolver {
                 return cached
             }
 
+            progress?.startedInspectingManifest(
+                package: package.identity, version: version.description)
             let source = try await manifestSource(package: package, version: version)
             let manifest = try await ManifestLoader.dumpPackage(
                 packageDir: source, disableSandbox: disableSandbox)
@@ -265,12 +291,19 @@ enum PackageResolver {
                 if let range = ManifestParser.versionRange(for: dependency.requirement) {
                     result.append((PackageKey.fromDependency(dependency), range))
                 } else {
+                    progress?.startedResolvingFixedPin(package: dependency.identity)
                     let pin = try await PackageResolver.resolveUnversionedDependency(dependency)
+                    progress?.finishedResolvingFixedPin(package: dependency.identity)
                     fixedPins[pin.identity.lowercased()] = pin
                 }
             }
 
             dependencies[cacheKey] = result
+            progress?.finishedInspectingManifest(
+                package: package.identity,
+                version: version.description,
+                dependencyCount: result.count
+            )
             return result
         }
 

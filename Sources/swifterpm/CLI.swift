@@ -380,9 +380,11 @@ enum CLIRunner {
         if readOnly || hasResolvedFile {
             resolved = try await ResolvedFile.read(packageDir: package)
         } else {
+            let progress = cli.quiet ? nil : ResolutionProgressReporter()
             let fresh = try await PackageResolver.resolve(
                 packageDir: package, cache: cache, registryConfig: registryConfig,
-                disableSandbox: cli.disableSandbox)
+                disableSandbox: cli.disableSandbox,
+                progress: progress)
             if shouldWrite(write: write, printOnly: printOnly) {
                 try await ResolvedFile.write(packageDir: package, resolved: fresh)
             }
