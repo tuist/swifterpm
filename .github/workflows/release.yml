@@ -15,10 +15,6 @@ concurrency:
 env:
   MISE_VERSION: "2026.4.18"
   MISE_GITHUB_ATTESTATIONS: "0"
-  CARGO_TERM_COLOR: always
-  CARGO_INCREMENTAL: "0"
-  CARGO_NET_RETRY: "10"
-  RUSTUP_MAX_RETRIES: "10"
 
 jobs:
   detect:
@@ -53,45 +49,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-24.04
-            target: x86_64-unknown-linux-gnu
           - runner: macos-15-intel
             target: x86_64-apple-darwin
           - runner: macos-15
             target: aarch64-apple-darwin
-          - runner: windows-latest
-            target: x86_64-pc-windows-msvc
     defaults:
       run:
         shell: bash
-    # Rust is installed via dtolnay/rust-toolchain rather than mise: the
-    # GitHub-hosted macos-15 (Apple Silicon) image ships a `rustup` that
-    # dispatches to installer (setup) mode, so `rustup target add` fails.
-    # Disabling the mise-managed rust keeps `mise run` from re-triggering it.
-    env:
-      MISE_DISABLE_TOOLS: rust
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
-        with:
-          toolchain: "1.94.0"
-          targets: ${{ matrix.target }}
 
       - name: Install mise tools
         uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
         with:
           version: ${{ env.MISE_VERSION }}
           cache: true
-          install_args: 1password-cli jq
-
-      - name: Cache Rust
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
-        with:
-          shared-key: release-${{ matrix.target }}
-          cache-on-failure: true
-          cache-bin: true
+          install_args: bazel 1password-cli jq
 
       - name: Package release archive
         env:
