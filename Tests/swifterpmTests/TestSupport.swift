@@ -71,3 +71,63 @@ func emptyManifest(name: String = "Fixture") -> [String: Any] {
         "targets": [],
     ]
 }
+
+func installedSwiftSupportsManifest(at packageDir: URL) async throws -> Bool {
+    guard let required = try await manifestToolsVersion(at: packageDir) else {
+        return true
+    }
+    return try await installedSwiftVersion() >= required
+}
+
+private func manifestToolsVersion(at packageDir: URL) async throws -> SwiftToolchainVersion? {
+    let manifest = packageDir.appendingPathComponent("Package.swift")
+    let contents = String(data: try await AsyncFileSystem.readData(from: manifest), encoding: .utf8)
+        ?? ""
+    guard let firstLine = contents.split(separator: "\n", omittingEmptySubsequences: false).first,
+        let range = firstLine.range(of: "swift-tools-version:")
+    else {
+        return nil
+    }
+    return SwiftToolchainVersion(
+        String(
+            firstLine[range.upperBound...]
+                .drop(while: { $0.isWhitespace })
+                .prefix(while: { $0.isNumber || $0 == "." })
+        ))
+}
+
+private func installedSwiftVersion() async throws -> SwiftToolchainVersion {
+    let output = try await SystemProcess.output("/usr/bin/swift", ["--version"])
+    for marker in ["Apple Swift version ", "Swift version "] {
+        if let range = output.range(of: marker),
+            let version = SwiftToolchainVersion(
+                String(
+                    output[range.upperBound...]
+                        .prefix(while: { $0.isNumber || $0 == "." })
+                ))
+        {
+            return version
+        }
+    }
+    throw ToolError.message("could not determine installed Swift version from: \(output)")
+}
+
+private struct SwiftToolchainVersion: Comparable, Sendable {
+    let major: Int
+    let minor: Int
+    let patch: Int
+
+    init?(_ string: String) {
+        let components = string.split(separator: ".").compactMap { Int($0) }
+        guard components.count >= 2 else { return nil }
+        major = components[0]
+        minor = components[1]
+        patch = components.count > 2 ? components[2] : 0
+    }
+
+    static func < (lhs: SwiftToolchainVersion, rhs: SwiftToolchainVersion) -> Bool {
+        if lhs.major != rhs.major { return lhs.major < rhs.major }
+        if lhs.minor != rhs.minor { return lhs.minor < rhs.minor }
+        return lhs.patch < rhs.patch
+    }
+}

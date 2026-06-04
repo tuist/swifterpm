@@ -18,6 +18,12 @@ struct FixtureResolutionTests {
     func recordedResolutionCoversManifestDependencies(fixturePath: String) async throws {
         try await withTemporaryDirectory { root in
             let source = try await fixtureURL(fixturePath.split(separator: "/").map(String.init))
+            if !(try await installedSwiftSupportsManifest(at: source)) {
+                let resolved = try await ResolvedFile.read(packageDir: source)
+                #expect(!resolved.pins.isEmpty)
+                return
+            }
+
             let package = root.appendingPathComponent(source.lastPathComponent)
             try await SystemProcess.run("/bin/cp", ["-R", source.path, package.path])
 
