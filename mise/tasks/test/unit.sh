@@ -2,4 +2,4 @@
 #MISE description="Run Swift unit tests"
 set -euo pipefail
 
-bazel test //:swifterpm_tests
+bazel test --test_output=all //:swifterpm_tests
