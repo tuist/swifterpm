@@ -44,9 +44,9 @@ func resolvePackage(
     registryConfig: RegistryConfig,
     disableSandbox: Bool
 ) async throws -> ResolvedPins {
-    let manifest = try dumpPackage(packageDir: packageDir, disableSandbox: disableSandbox)
+    let manifest = try await dumpPackage(packageDir: packageDir, disableSandbox: disableSandbox)
     let dependencies = try parseManifestDependencies(manifest)
-    let originHash = try originHash(packageDir: packageDir)
+    let originHash = try await originHash(packageDir: packageDir)
     guard !dependencies.isEmpty else {
         return ResolvedPins(originHash: originHash, pins: [], version: 3)
     }
@@ -61,7 +61,7 @@ func resolvePackage(
             rootDirectPackages.insert(package)
             rootDependencies.append((package, range))
         } else {
-            fixedPins.append(try resolveUnversionedDependency(dependency))
+            fixedPins.append(try await resolveUnversionedDependency(dependency))
         }
     }
 
@@ -149,7 +149,7 @@ private final class NativeDependencyProvider {
 
         var pins: [ResolvedPin] = []
         for (package, resolvedVersion) in selected where package != .root {
-            pins.append(try pinForResolvedVersion(package: package, resolvedVersion: resolvedVersion))
+            pins.append(try await pinForResolvedVersion(package: package, resolvedVersion: resolvedVersion))
         }
         pins.append(contentsOf: fixedPins.values)
         return pins
@@ -234,7 +234,7 @@ private final class NativeDependencyProvider {
         }
 
         let source = try await manifestSource(package: package, version: version)
-        let manifest = try dumpPackage(packageDir: source, disableSandbox: disableSandbox)
+        let manifest = try await dumpPackage(packageDir: source, disableSandbox: disableSandbox)
         let manifestDependencies = rootDirectPackages.contains(package)
             ? try parseManifestDependencies(manifest)
             : try parseRequiredManifestDependencies(manifest)
@@ -244,7 +244,7 @@ private final class NativeDependencyProvider {
             if let range = versionRange(for: dependency.requirement) {
                 result.append((PackageKey.fromDependency(dependency), range))
             } else {
-                let pin = try resolveUnversionedDependency(dependency)
+                let pin = try await resolveUnversionedDependency(dependency)
                 fixedPins[pin.identity.lowercased()] = pin
             }
         }
@@ -267,7 +267,7 @@ private final class NativeDependencyProvider {
 
     private func manifestSource(package: PackageKey, version: SemVer) async throws -> URL {
         if package.kind == .sourceControl,
-           let local = localSourceControlPackageLocation(package.location)
+           let local = try await localSourceControlPackageLocation(package.location)
         {
             return local
         }
@@ -287,7 +287,7 @@ private final class NativeDependencyProvider {
             }
             return ResolvedPin(
                 identity: package.identity,
-                kind: sourceControlKind(location: package.location),
+                kind: try await sourceControlKind(location: package.location),
                 location: package.location,
                 state: ResolvedState(branch: nil, revision: revision, version: version.description)
             )
@@ -301,7 +301,7 @@ private final class NativeDependencyProvider {
         }
     }
 
-    private func pinForResolvedVersion(package: PackageKey, resolvedVersion: ResolvedVersion) throws -> ResolvedPin {
+    private func pinForResolvedVersion(package: PackageKey, resolvedVersion: ResolvedVersion) async throws -> ResolvedPin {
         switch package.kind {
         case .root:
             throw ToolError.message("root package has no pin")
@@ -311,7 +311,7 @@ private final class NativeDependencyProvider {
             }
             return ResolvedPin(
                 identity: package.identity,
-                kind: sourceControlKind(location: package.location),
+                kind: try await sourceControlKind(location: package.location),
                 location: package.location,
                 state: ResolvedState(branch: nil, revision: revision, version: resolvedVersion.version.description)
             )
@@ -326,7 +326,7 @@ private final class NativeDependencyProvider {
     }
 }
 
-private func resolveUnversionedDependency(_ dependency: ManifestDependency) throws -> ResolvedPin {
+private func resolveUnversionedDependency(_ dependency: ManifestDependency) async throws -> ResolvedPin {
     if dependency.kind == .registry {
         throw ToolError.message("registry dependencies do not support branch or revision requirements")
     }
@@ -338,7 +338,7 @@ private func resolveUnversionedDependency(_ dependency: ManifestDependency) thro
     case let .branch(branch):
         state = ResolvedState(
             branch: branch,
-            revision: try resolveNamedRef(location: dependency.location, name: branch),
+            revision: try await resolveNamedRef(location: dependency.location, name: branch),
             version: nil
         )
     case .exact, .range:
@@ -347,7 +347,7 @@ private func resolveUnversionedDependency(_ dependency: ManifestDependency) thro
 
     return ResolvedPin(
         identity: dependency.identity,
-        kind: sourceControlKind(location: dependency.location),
+        kind: try await sourceControlKind(location: dependency.location),
         location: dependency.location,
         state: state
     )
@@ -384,7 +384,7 @@ private func canonicalSourceControlLocation(_ location: String) -> String {
     return value
 }
 
-func localSourceControlPackageLocation(_ location: String) -> URL? {
+func localSourceControlPackageLocation(_ location: String) async throws -> URL? {
     let url: URL
     if let fileURL = URL(string: location), fileURL.isFileURL {
         url = fileURL
@@ -394,16 +394,17 @@ func localSourceControlPackageLocation(_ location: String) -> URL? {
         return nil
     }
 
-    guard FileManager.default.fileExists(atPath: url.appendingPathComponent("Package.swift").path) else {
+    guard try await AsyncFileSystem.exists(url.appendingPathComponent("Package.swift")) else {
         return nil
     }
     return url.standardizedFileURL.resolvingSymlinksInPath()
 }
 
-func sourceControlKind(location: String) -> String {
-    localSourceControlPackageLocation(location) == nil ? "remoteSourceControl" : "localSourceControl"
+func sourceControlKind(location: String) async throws -> String {
+    let local = try await localSourceControlPackageLocation(location)
+    return local == nil ? "remoteSourceControl" : "localSourceControl"
 }
 
-private func originHash(packageDir: URL) throws -> String {
-    sha256Hex(try Data(contentsOf: packageDir.appendingPathComponent("Package.swift")))
+private func originHash(packageDir: URL) async throws -> String {
+    sha256Hex(try await AsyncFileSystem.readData(from: packageDir.appendingPathComponent("Package.swift")))
 }

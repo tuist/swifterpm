@@ -178,7 +178,7 @@ func httpData(url: URL, headers: [String: String] = [:]) async throws -> Data {
 
 func httpDownload(url: URL, destination: URL, headers: [String: String] = [:]) async throws {
     let data = try await httpData(url: url, headers: headers)
-    try atomicWrite(data, to: destination)
+    try await atomicWrite(data, to: destination)
 }
 
 func stableHash(_ input: String) -> String {
@@ -194,26 +194,66 @@ func shortRevision(_ revision: String) -> String {
     String(revision.prefix(12))
 }
 
-func atomicWrite(_ data: Data, to url: URL) throws {
-    try FileManager.default.createDirectory(
-        at: url.deletingLastPathComponent(),
-        withIntermediateDirectories: true
-    )
-    try data.write(to: url, options: .atomic)
+private let defaultParallelism = max(4, min(32, ProcessInfo.processInfo.activeProcessorCount * 4))
+
+func parallelMap<Element: Sendable, Result: Sendable>(
+    _ elements: [Element],
+    maxConcurrentTasks: Int = defaultParallelism,
+    operation: @Sendable @escaping (Element) async throws -> Result
+) async throws -> [Result] {
+    guard !elements.isEmpty else { return [] }
+    let limit = max(1, min(maxConcurrentTasks, elements.count))
+
+    return try await withThrowingTaskGroup(of: Result.self) { group in
+        var iterator = elements.makeIterator()
+        var activeTasks = 0
+        var results: [Result] = []
+        results.reserveCapacity(elements.count)
+
+        while activeTasks < limit, let element = iterator.next() {
+            group.addTask {
+                try await operation(element)
+            }
+            activeTasks += 1
+        }
+
+        while activeTasks > 0 {
+            guard let result = try await group.next() else { break }
+            activeTasks -= 1
+            results.append(result)
+
+            if let element = iterator.next() {
+                group.addTask {
+                    try await operation(element)
+                }
+                activeTasks += 1
+            }
+        }
+
+        return results
+    }
 }
 
-func atomicWrite(_ string: String, to url: URL) throws {
-    try atomicWrite(Data(string.utf8), to: url)
+func parallelForEach<Element: Sendable>(
+    _ elements: [Element],
+    maxConcurrentTasks: Int = defaultParallelism,
+    operation: @Sendable @escaping (Element) async throws -> Void
+) async throws {
+    _ = try await parallelMap(elements, maxConcurrentTasks: maxConcurrentTasks, operation: operation) as [Void]
 }
 
-final class PathLock {
+func atomicWrite(_ data: Data, to url: URL) async throws {
+    try await AsyncFileSystem.writeData(data, to: url)
+}
+
+func atomicWrite(_ string: String, to url: URL) async throws {
+    try await atomicWrite(Data(string.utf8), to: url)
+}
+
+final class PathLock: @unchecked Sendable {
     private let fd: Int32
 
     init(path: URL) throws {
-        try FileManager.default.createDirectory(
-            at: path.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
         fd = open(path.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH)
         if fd < 0 {
             throw ToolError.message("failed to open lock \(path.path)")
@@ -230,61 +270,62 @@ final class PathLock {
     }
 }
 
-func pathExistsOrIsSymlink(_ url: URL) -> Bool {
-    var statBuffer = stat()
-    return lstat(url.path, &statBuffer) == 0
+func pathLock(at path: URL) async throws -> PathLock {
+    try await AsyncFileSystem.createDirectory(
+        at: path.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    return try await Task.detached {
+        try PathLock(path: path)
+    }.value
 }
 
-func isDirectoryAndNotSymlink(_ url: URL) -> Bool {
-    var statBuffer = stat()
-    guard lstat(url.path, &statBuffer) == 0 else { return false }
-    let fileType = statBuffer.st_mode & S_IFMT
-    return fileType == S_IFDIR
+func pathExistsOrIsSymlink(_ url: URL) async throws -> Bool {
+    try await AsyncFileSystem.exists(url)
 }
 
-func removePath(_ url: URL) throws {
-    guard pathExistsOrIsSymlink(url) else { return }
-    if isDirectoryAndNotSymlink(url) {
-        try FileManager.default.removeItem(at: url)
-    } else {
-        try FileManager.default.removeItem(at: url)
+func isDirectoryAndNotSymlink(_ url: URL) async throws -> Bool {
+    try await AsyncFileSystem.isDirectoryAndNotSymlink(url)
+}
+
+func removePath(_ url: URL) async throws {
+    guard try await pathExistsOrIsSymlink(url) else { return }
+    try await AsyncFileSystem.removeItem(at: url)
+}
+
+func replaceWithSymlinkedDirectoryContents(source: URL, destination: URL) async throws {
+    if try await pathExistsOrIsSymlink(destination) {
+        try await removePath(destination)
     }
-}
-
-func replaceWithSymlinkedDirectoryContents(source: URL, destination: URL) throws {
-    if pathExistsOrIsSymlink(destination) {
-        try removePath(destination)
-    }
-    try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
-    let entries = try FileManager.default.contentsOfDirectory(at: source, includingPropertiesForKeys: nil)
-    for entry in entries {
-        try FileManager.default.createSymbolicLink(
+    try await AsyncFileSystem.createDirectory(at: destination, withIntermediateDirectories: true)
+    let entries = try await AsyncFileSystem.contentsOfDirectory(at: source)
+    try await parallelForEach(entries) { entry in
+        try await AsyncFileSystem.createSymbolicLink(
             at: destination.appendingPathComponent(entry.lastPathComponent),
             withDestinationURL: entry
         )
     }
 }
 
-func flattenSingleDirectory(_ url: URL) throws {
-    let entries = try FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey])
+func flattenSingleDirectory(_ url: URL) async throws {
+    let entries = try await AsyncFileSystem.contentsOfDirectory(at: url)
     guard entries.count == 1 else { return }
     let nested = entries[0]
-    let values = try nested.resourceValues(forKeys: [.isDirectoryKey])
-    guard values.isDirectory == true else { return }
+    guard try await AsyncFileSystem.isDirectoryAndNotSymlink(nested) else { return }
 
     let temp = url.deletingLastPathComponent().appendingPathComponent("\(url.lastPathComponent).flattening")
-    if FileManager.default.fileExists(atPath: temp.path) {
-        try FileManager.default.removeItem(at: temp)
+    if try await AsyncFileSystem.exists(temp) {
+        try await AsyncFileSystem.removeItem(at: temp)
     }
-    try FileManager.default.moveItem(at: nested, to: temp)
-    try FileManager.default.removeItem(at: url)
-    try FileManager.default.moveItem(at: temp, to: url)
+    try await AsyncFileSystem.moveItem(at: nested, to: temp)
+    try await AsyncFileSystem.removeItem(at: url)
+    try await AsyncFileSystem.moveItem(at: temp, to: url)
 }
 
-func temporaryDirectory(in parent: URL) throws -> URL {
-    try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+func temporaryDirectory(in parent: URL) async throws -> URL {
+    try await AsyncFileSystem.createDirectory(at: parent, withIntermediateDirectories: true)
     let url = parent.appendingPathComponent(".tmp-\(UUID().uuidString)")
-    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    try await AsyncFileSystem.createDirectory(at: url, withIntermediateDirectories: true)
     return url
 }
 

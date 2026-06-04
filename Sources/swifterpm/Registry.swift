@@ -4,14 +4,14 @@ struct RegistryConfig: Sendable {
     private var defaultRegistryURL: URL?
     private var scopedRegistryURLs: [String: URL] = [:]
 
-    static func load(packageDir: URL, configPath: URL?, defaultRegistryURL: String?) throws -> RegistryConfig {
+    static func load(packageDir: URL, configPath: URL?, defaultRegistryURL: String?) async throws -> RegistryConfig {
         var config = RegistryConfig()
         if let global = globalRegistriesPath() {
-            try config.mergeFile(global)
+            try await config.mergeFile(global)
         }
-        try config.mergeFile(packageDir.appendingPathComponent(".swiftpm/configuration/registries.json"))
+        try await config.mergeFile(packageDir.appendingPathComponent(".swiftpm/configuration/registries.json"))
         if let configPath {
-            try config.mergeFile(registriesPath(fromConfigPath: configPath))
+            try await config.mergeFile(try await registriesPath(fromConfigPath: configPath))
         }
         if let defaultRegistryURL {
             config.defaultRegistryURL = try parseRegistryURL(defaultRegistryURL)
@@ -30,9 +30,9 @@ struct RegistryConfig: Sendable {
         throw ToolError.message("no registry configured for '\(scope)' scope")
     }
 
-    private mutating func mergeFile(_ path: URL) throws {
-        guard FileManager.default.fileExists(atPath: path.path) else { return }
-        guard let root = try JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any],
+    private mutating func mergeFile(_ path: URL) async throws {
+        guard try await AsyncFileSystem.exists(path) else { return }
+        guard let root = try JSONSerialization.jsonObject(with: try await AsyncFileSystem.readData(from: path)) as? [String: Any],
               let registries = root["registries"] as? [String: Any]
         else {
             return
@@ -69,16 +69,16 @@ private struct RegistryVersionsCache: Codable {
 
 func registryVersions(identity: String, registryConfig: RegistryConfig, cache: Cache) async throws -> [RegistryVersion] {
     let registryURL = try registryConfig.registryURL(for: identity)
-    if let cached = try readCachedRegistryVersions(cache: cache, registryURL: registryURL.absoluteString, identity: identity) {
+    if let cached = try await readCachedRegistryVersions(cache: cache, registryURL: registryURL.absoluteString, identity: identity) {
         return cached
     }
-    let lock = try cache.lock(namespace: "registry-versions", key: "\(registryURL.absoluteString):\(identity)")
+    let lock = try await cache.lock(namespace: "registry-versions", key: "\(registryURL.absoluteString):\(identity)")
     _ = lock
-    if let cached = try readCachedRegistryVersions(cache: cache, registryURL: registryURL.absoluteString, identity: identity) {
+    if let cached = try await readCachedRegistryVersions(cache: cache, registryURL: registryURL.absoluteString, identity: identity) {
         return cached
     }
     let versions = try await fetchRegistryVersions(registryURL: registryURL, identity: identity)
-    try writeCachedRegistryVersions(cache: cache, registryURL: registryURL.absoluteString, identity: identity, versions: versions)
+    try await writeCachedRegistryVersions(cache: cache, registryURL: registryURL.absoluteString, identity: identity, versions: versions)
     return versions
 }
 
@@ -91,22 +91,22 @@ func downloadRegistryArchive(
 ) async throws {
     let registryURL = try registryConfig.registryURL(for: identity)
     let archivePath = cache.registryArchivePath(identity: identity, version: version)
-    if !FileManager.default.fileExists(atPath: archivePath.path) {
-        let lock = try cache.lock(namespace: "registry-archives", key: archivePath.path)
+    if !(try await AsyncFileSystem.exists(archivePath)) {
+        let lock = try await cache.lock(namespace: "registry-archives", key: archivePath.path)
         _ = lock
-        if !FileManager.default.fileExists(atPath: archivePath.path) {
+        if !(try await AsyncFileSystem.exists(archivePath)) {
             let expectedChecksum = try await fetchSourceArchiveChecksum(registryURL: registryURL, identity: identity, version: version)
             let data = try await fetchRegistryArchive(registryURL: registryURL, identity: identity, version: version)
             let actual = sha256Hex(data)
             guard actual.caseInsensitiveCompare(expectedChecksum) == .orderedSame else {
                 throw ToolError.message("\(identity) \(version) checksum mismatch: expected \(expectedChecksum), got \(actual)")
             }
-            try atomicWrite(data, to: archivePath)
+            try await atomicWrite(data, to: archivePath)
         }
     }
 
     try await runCommandAsync("/usr/bin/unzip", ["-q", archivePath.path, "-d", destination.path])
-    try flattenSingleDirectory(destination)
+    try await flattenSingleDirectory(destination)
 }
 
 private func fetchRegistryVersions(registryURL: URL, identity: String) async throws -> [RegistryVersion] {
@@ -161,9 +161,8 @@ private func parseRegistryURL(_ url: String) throws -> URL {
     return parsed
 }
 
-private func registriesPath(fromConfigPath configPath: URL) -> URL {
-    var isDirectory: ObjCBool = false
-    if FileManager.default.fileExists(atPath: configPath.path, isDirectory: &isDirectory), !isDirectory.boolValue {
+private func registriesPath(fromConfigPath configPath: URL) async throws -> URL {
+    if try await AsyncFileSystem.isRegularFile(configPath) {
         return configPath
     }
     return configPath.appendingPathComponent("registries.json")
@@ -175,23 +174,22 @@ private func globalRegistriesPath() -> URL? {
     }
 }
 
-private func readCachedRegistryVersions(cache: Cache, registryURL: String, identity: String) throws -> [RegistryVersion]? {
+private func readCachedRegistryVersions(cache: Cache, registryURL: String, identity: String) async throws -> [RegistryVersion]? {
     let path = cache.registryVersionsPath(registryURL: registryURL, identity: identity)
-    guard FileManager.default.fileExists(atPath: path.path) else { return nil }
-    let attrs = try FileManager.default.attributesOfItem(atPath: path.path)
-    if let modified = attrs[.modificationDate] as? Date,
+    guard try await AsyncFileSystem.exists(path) else { return nil }
+    if let modified = try await AsyncFileSystem.modificationDate(path),
        Date().timeIntervalSince(modified) > 60 * 60
     {
         return nil
     }
-    let cached = try JSONDecoder().decode(RegistryVersionsCache.self, from: Data(contentsOf: path))
+    let cached = try JSONDecoder().decode(RegistryVersionsCache.self, from: try await AsyncFileSystem.readData(from: path))
     guard cached.registryURL == registryURL, cached.identity == identity else { return nil }
     return cached.versions
 }
 
-private func writeCachedRegistryVersions(cache: Cache, registryURL: String, identity: String, versions: [RegistryVersion]) throws {
+private func writeCachedRegistryVersions(cache: Cache, registryURL: String, identity: String, versions: [RegistryVersion]) async throws {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
     let data = try encoder.encode(RegistryVersionsCache(registryURL: registryURL, identity: identity, versions: versions)) + Data("\n".utf8)
-    try atomicWrite(data, to: cache.registryVersionsPath(registryURL: registryURL, identity: identity))
+    try await atomicWrite(data, to: cache.registryVersionsPath(registryURL: registryURL, identity: identity))
 }

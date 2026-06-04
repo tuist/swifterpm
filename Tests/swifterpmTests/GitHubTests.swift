@@ -23,4 +23,18 @@ struct GitHubTests {
             try GitHubRepo(location: "https://gitlab.com/tuist/swifterpm")
         }
     }
+
+    @Test
+    func sourceControlFetchLocationsPreferOriginalThenGitHubSSH() {
+        #expect(sourceControlFetchLocations("https://github.com/tuist/swifterpm") == [
+            "https://github.com/tuist/swifterpm",
+            "git@github.com:tuist/swifterpm.git",
+        ])
+        #expect(sourceControlFetchLocations("git@github.com:tuist/swifterpm.git") == [
+            "git@github.com:tuist/swifterpm.git",
+        ])
+        #expect(sourceControlFetchLocations("https://gitlab.com/tuist/swifterpm") == [
+            "https://gitlab.com/tuist/swifterpm",
+        ])
+    }
 }

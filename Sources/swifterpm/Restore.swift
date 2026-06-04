@@ -7,12 +7,16 @@ func restorePackage(
     resolved: ResolvedPins,
     quiet: Bool
 ) async throws {
-    let scratchLock = try PathLock(path: scratchDir.appendingPathComponent(".swifterpm.lock"))
+    let scratchLock = try await pathLock(at: scratchDir.appendingPathComponent(".swifterpm.lock"))
     _ = scratchLock
     let checkouts = scratchDir.appendingPathComponent("checkouts")
     let registryDownloads = scratchDir.appendingPathComponent("registry/downloads")
-    try FileManager.default.createDirectory(at: checkouts, withIntermediateDirectories: true)
-    try FileManager.default.createDirectory(at: registryDownloads, withIntermediateDirectories: true)
+    async let createCheckouts: Void = AsyncFileSystem.createDirectory(at: checkouts, withIntermediateDirectories: true)
+    async let createRegistryDownloads: Void = AsyncFileSystem.createDirectory(
+        at: registryDownloads,
+        withIntermediateDirectories: true
+    )
+    _ = try await (createCheckouts, createRegistryDownloads)
 
     let sourcePins = resolved.pins.filter { isSourceControlKind($0.kind) }
     let registryPins = resolved.pins.filter { isRegistryKind($0.kind) }
@@ -47,17 +51,13 @@ private func restoreSourcePins(
     checkouts: URL,
     cache: Cache
 ) async throws -> [(String, URL)] {
-    try await withThrowingTaskGroup(of: (String, URL).self) { group in
-        for pin in pins {
-            group.addTask {
-                let source = try await ensureSource(cache: cache, pin: pin)
-                let checkout = checkouts.appendingPathComponent(checkoutDirectoryName(pin))
-                try replaceWithSymlinkedDirectoryContents(source: source, destination: checkout)
-                return (pin.identity, source)
-            }
-        }
-        return try await collectSortedTaskResults(group)
+    let results = try await parallelMap(pins) { pin in
+        let source = try await ensureSource(cache: cache, pin: pin)
+        let checkout = checkouts.appendingPathComponent(checkoutDirectoryName(pin))
+        try await replaceWithSymlinkedDirectoryContents(source: source, destination: checkout)
+        return (pin.identity, source)
     }
+    return results.sorted { $0.0 < $1.0 }
 }
 
 private func restoreRegistryPins(
@@ -66,61 +66,53 @@ private func restoreRegistryPins(
     cache: Cache,
     registryConfig: RegistryConfig
 ) async throws -> [(String, URL)] {
-    try await withThrowingTaskGroup(of: (String, URL).self) { group in
-        for pin in pins {
-            group.addTask {
-                let source = try await ensureRegistrySource(cache: cache, registryConfig: registryConfig, pin: pin)
-                let download = registryDownloads.appendingPathComponent(try registryDownloadSubpath(pin))
-                try replaceWithSymlinkedDirectoryContents(source: source, destination: download)
-                return (pin.identity, source)
-            }
-        }
-        return try await collectSortedTaskResults(group)
-    }
-}
-
-private func collectSortedTaskResults(
-    _ group: ThrowingTaskGroup<(String, URL), any Error>
-) async throws -> [(String, URL)] {
-    var results: [(String, URL)] = []
-    for try await result in group {
-        results.append(result)
+    let results = try await parallelMap(pins) { pin in
+        let source = try await ensureRegistrySource(cache: cache, registryConfig: registryConfig, pin: pin)
+        let download = registryDownloads.appendingPathComponent(try registryDownloadSubpath(pin))
+        try await replaceWithSymlinkedDirectoryContents(source: source, destination: download)
+        return (pin.identity, source)
     }
     return results.sorted { $0.0 < $1.0 }
 }
 
 func ensureSource(cache: Cache, pin: ResolvedPin) async throws -> URL {
     let destination = try cache.sourcePath(pin: pin)
-    if FileManager.default.fileExists(atPath: destination.appendingPathComponent("Package.swift").path) {
+    let manifest = destination.appendingPathComponent("Package.swift")
+    if try await AsyncFileSystem.exists(manifest) {
         return destination
     }
 
-    let lock = try cache.lock(namespace: "sources", key: destination.path)
+    let lock = try await cache.lock(namespace: "sources", key: destination.path)
     _ = lock
-    if FileManager.default.fileExists(atPath: destination.appendingPathComponent("Package.swift").path) {
+    if try await AsyncFileSystem.exists(manifest) {
         return destination
     }
-    if FileManager.default.fileExists(atPath: destination.path) {
-        try FileManager.default.removeItem(at: destination)
+    if try await AsyncFileSystem.exists(destination) {
+        try await AsyncFileSystem.removeItem(at: destination)
     }
     let parent = destination.deletingLastPathComponent()
-    try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
-    let temp = try temporaryDirectory(in: parent)
-    defer { try? FileManager.default.removeItem(at: temp) }
+    try await AsyncFileSystem.createDirectory(at: parent, withIntermediateDirectories: true)
+    let temp = try await temporaryDirectory(in: parent)
 
     do {
-        try await downloadGitHubArchive(cache: cache, pin: pin, destination: temp)
-    } catch {
-        try resetDirectory(temp)
-        try await shallowFetchCheckout(pin: pin, destination: temp)
-    }
-
-    do {
-        try FileManager.default.moveItem(at: temp, to: destination)
-    } catch {
-        if FileManager.default.fileExists(atPath: destination.appendingPathComponent("Package.swift").path) {
-            return destination
+        do {
+            try await downloadGitHubArchive(cache: cache, pin: pin, destination: temp)
+        } catch {
+            try await resetDirectory(temp)
+            try await shallowFetchCheckout(pin: pin, destination: temp)
         }
+
+        do {
+            try await AsyncFileSystem.moveItem(at: temp, to: destination)
+        } catch {
+            if try await AsyncFileSystem.exists(manifest) {
+                try? await AsyncFileSystem.removeItem(at: temp)
+                return destination
+            }
+            throw error
+        }
+    } catch {
+        try? await AsyncFileSystem.removeItem(at: temp)
         throw error
     }
     return destination
@@ -128,35 +120,36 @@ func ensureSource(cache: Cache, pin: ResolvedPin) async throws -> URL {
 
 func ensureRegistrySource(cache: Cache, registryConfig: RegistryConfig, pin: ResolvedPin) async throws -> URL {
     let destination = try cache.sourcePath(pin: pin)
-    if FileManager.default.fileExists(atPath: destination.appendingPathComponent("Package.swift").path) {
+    let manifest = destination.appendingPathComponent("Package.swift")
+    if try await AsyncFileSystem.exists(manifest) {
         return destination
     }
 
-    let lock = try cache.lock(namespace: "sources", key: destination.path)
+    let lock = try await cache.lock(namespace: "sources", key: destination.path)
     _ = lock
-    if FileManager.default.fileExists(atPath: destination.appendingPathComponent("Package.swift").path) {
+    if try await AsyncFileSystem.exists(manifest) {
         return destination
     }
-    if FileManager.default.fileExists(atPath: destination.path) {
-        try FileManager.default.removeItem(at: destination)
+    if try await AsyncFileSystem.exists(destination) {
+        try await AsyncFileSystem.removeItem(at: destination)
     }
     let parent = destination.deletingLastPathComponent()
-    try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
-    let temp = try temporaryDirectory(in: parent)
-    defer { try? FileManager.default.removeItem(at: temp) }
-
-    try await downloadRegistryArchive(
-        cache: cache,
-        registryConfig: registryConfig,
-        identity: pin.identity,
-        version: try pin.versionString(),
-        destination: temp
-    )
+    try await AsyncFileSystem.createDirectory(at: parent, withIntermediateDirectories: true)
+    let temp = try await temporaryDirectory(in: parent)
 
     do {
-        try FileManager.default.moveItem(at: temp, to: destination)
+        try await downloadRegistryArchive(
+            cache: cache,
+            registryConfig: registryConfig,
+            identity: pin.identity,
+            version: try pin.versionString(),
+            destination: temp
+        )
+
+        try await AsyncFileSystem.moveItem(at: temp, to: destination)
     } catch {
-        if FileManager.default.fileExists(atPath: destination.appendingPathComponent("Package.swift").path) {
+        try? await AsyncFileSystem.removeItem(at: temp)
+        if try await AsyncFileSystem.exists(manifest) {
             return destination
         }
         throw error
@@ -168,12 +161,12 @@ private func downloadGitHubArchive(cache: Cache, pin: ResolvedPin, destination: 
     let repo = try GitHubRepo(location: pin.location)
     let revision = try pin.revision()
     let archivePath = cache.archivePath(url: pin.location, revision: revision)
-    if !FileManager.default.fileExists(atPath: archivePath.path) {
-        let lock = try cache.lock(namespace: "archives", key: archivePath.path)
+    if !(try await AsyncFileSystem.exists(archivePath)) {
+        let lock = try await cache.lock(namespace: "archives", key: archivePath.path)
         _ = lock
-        if !FileManager.default.fileExists(atPath: archivePath.path) {
+        if !(try await AsyncFileSystem.exists(archivePath)) {
             var headers = ["User-Agent": "swifterpm/0.1"]
-            if let token = githubToken() {
+            if let token = await githubToken() {
                 headers["Authorization"] = "Bearer \(token)"
             }
             let url = URL(string: "https://api.github.com/repos/\(repo.owner)/\(repo.repo)/tarball/\(revision)")!
@@ -182,42 +175,52 @@ private func downloadGitHubArchive(cache: Cache, pin: ResolvedPin, destination: 
     }
 
     try await runCommandAsync("/usr/bin/tar", ["-xzf", archivePath.path, "-C", destination.path])
-    try flattenSingleDirectory(destination)
-    try rejectArchiveWithSubmodules(destination)
+    try await flattenSingleDirectory(destination)
+    try await rejectArchiveWithSubmodules(destination)
 }
 
 private func shallowFetchCheckout(pin: ResolvedPin, destination: URL) async throws {
     let revision = try pin.revision()
-    try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
-    try await runCommandAsync("/usr/bin/git", ["init", destination.path])
-    try await runCommandAsync("/usr/bin/git", ["-C", destination.path, "remote", "add", "origin", pin.location])
-    try await runCommandAsync("/usr/bin/git", ["-C", destination.path, "fetch", "--depth=1", "origin", revision])
-    try await runCommandAsync("/usr/bin/git", ["-C", destination.path, "checkout", "--detach", "FETCH_HEAD"])
-    try await runCommandAsync("/usr/bin/git", ["-C", destination.path, "submodule", "update", "--init", "--recursive"])
-    let gitDir = destination.appendingPathComponent(".git")
-    if localSourceControlPackageLocation(pin.location) == nil,
-       FileManager.default.fileExists(atPath: gitDir.path)
-    {
-        try FileManager.default.removeItem(at: gitDir)
+    var lastError: (any Error)?
+    for location in sourceControlFetchLocations(pin.location) {
+        do {
+            try await resetDirectory(destination)
+            try await runCommandAsync("/usr/bin/git", ["init", destination.path])
+            try await runCommandAsync("/usr/bin/git", ["-C", destination.path, "remote", "add", "origin", location])
+            try await runCommandAsync("/usr/bin/git", ["-C", destination.path, "fetch", "--depth=1", "origin", revision])
+            try await runCommandAsync("/usr/bin/git", ["-C", destination.path, "checkout", "--detach", "FETCH_HEAD"])
+            try await runCommandAsync("/usr/bin/git", ["-C", destination.path, "submodule", "update", "--init", "--recursive"])
+            let gitDir = destination.appendingPathComponent(".git")
+            if try await localSourceControlPackageLocation(pin.location) == nil,
+               try await AsyncFileSystem.exists(gitDir)
+            {
+                try await AsyncFileSystem.removeItem(at: gitDir)
+            }
+            return
+        } catch {
+            lastError = error
+        }
     }
+    throw lastError ?? ToolError.message("failed to fetch \(pin.location)")
 }
 
-private func rejectArchiveWithSubmodules(_ destination: URL) throws {
-    if FileManager.default.fileExists(atPath: destination.appendingPathComponent(".gitmodules").path) {
+private func rejectArchiveWithSubmodules(_ destination: URL) async throws {
+    if try await AsyncFileSystem.exists(destination.appendingPathComponent(".gitmodules")) {
         throw ToolError.message("\(destination.path) declares git submodules, which GitHub source archives do not include")
     }
 }
 
-private func resetDirectory(_ url: URL) throws {
-    if FileManager.default.fileExists(atPath: url.path) {
-        for entry in try FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil) {
-            try removePath(entry)
+private func resetDirectory(_ url: URL) async throws {
+    if try await AsyncFileSystem.exists(url) {
+        let entries = try await AsyncFileSystem.contentsOfDirectory(at: url)
+        try await parallelForEach(entries) { entry in
+            try await removePath(entry)
         }
     }
-    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    try await AsyncFileSystem.createDirectory(at: url, withIntermediateDirectories: true)
 }
 
-func writeWorkspaceState(packageDir: URL, scratchDir: URL, resolved: ResolvedPins, disableSandbox: Bool) throws {
+func writeWorkspaceState(packageDir: URL, scratchDir: URL, resolved: ResolvedPins, disableSandbox: Bool) async throws {
     var dependencies: [[String: Any]] = []
     var artifacts: [[String: Any]] = []
 
@@ -240,7 +243,7 @@ func writeWorkspaceState(packageDir: URL, scratchDir: URL, resolved: ResolvedPin
                 ],
                 "subpath": checkoutDirectoryName(pin),
             ])
-            artifacts.append(contentsOf: try discoverArtifacts(scratchDir: scratchDir, pin: pin))
+            artifacts.append(contentsOf: try await discoverArtifacts(scratchDir: scratchDir, pin: pin))
         } else if isRegistryKind(pin.kind) {
             dependencies.append([
                 "basedOn": NSNull(),
@@ -256,11 +259,11 @@ func writeWorkspaceState(packageDir: URL, scratchDir: URL, resolved: ResolvedPin
                 ],
                 "subpath": try registryDownloadSubpath(pin),
             ])
-            artifacts.append(contentsOf: try discoverArtifacts(scratchDir: scratchDir, pin: pin))
+            artifacts.append(contentsOf: try await discoverArtifacts(scratchDir: scratchDir, pin: pin))
         }
     }
 
-    let manifest = try dumpPackage(packageDir: packageDir, disableSandbox: disableSandbox)
+    let manifest = try await dumpPackage(packageDir: packageDir, disableSandbox: disableSandbox)
     for dependency in try parseManifestFileSystemDependencies(manifest) {
         dependencies.append([
             "basedOn": NSNull(),
@@ -287,24 +290,23 @@ func writeWorkspaceState(packageDir: URL, scratchDir: URL, resolved: ResolvedPin
         ],
         "version": 7,
     ]
-    try FileManager.default.createDirectory(at: scratchDir, withIntermediateDirectories: true)
-    try atomicWrite(try prettyJSONData(state), to: scratchDir.appendingPathComponent("workspace-state.json"))
+    try await AsyncFileSystem.createDirectory(at: scratchDir, withIntermediateDirectories: true)
+    try await atomicWrite(try prettyJSONData(state), to: scratchDir.appendingPathComponent("workspace-state.json"))
 }
 
-private func discoverArtifacts(scratchDir: URL, pin: ResolvedPin) throws -> [[String: Any]] {
+private func discoverArtifacts(scratchDir: URL, pin: ResolvedPin) async throws -> [[String: Any]] {
     let artifactsDir = scratchDir.appendingPathComponent("artifacts").appendingPathComponent(pin.identity)
-    guard FileManager.default.fileExists(atPath: artifactsDir.path) else {
+    guard try await AsyncFileSystem.exists(artifactsDir) else {
         return []
     }
     var artifacts: [[String: Any]] = []
-    try collectArtifacts(directory: artifactsDir, pin: pin, artifacts: &artifacts)
+    try await collectArtifacts(directory: artifactsDir, pin: pin, artifacts: &artifacts)
     return artifacts
 }
 
-private func collectArtifacts(directory: URL, pin: ResolvedPin, artifacts: inout [[String: Any]]) throws {
-    for entry in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isDirectoryKey]) {
-        let values = try entry.resourceValues(forKeys: [.isDirectoryKey])
-        guard values.isDirectory == true else { continue }
+private func collectArtifacts(directory: URL, pin: ResolvedPin, artifacts: inout [[String: Any]]) async throws {
+    for entry in try await AsyncFileSystem.contentsOfDirectory(at: directory) {
+        guard try await AsyncFileSystem.isDirectoryAndNotSymlink(entry) else { continue }
         if entry.pathExtension == "xcframework" {
             artifacts.append([
                 "kind": ["xcframework": [:]],
@@ -318,7 +320,7 @@ private func collectArtifacts(directory: URL, pin: ResolvedPin, artifacts: inout
                 "targetName": entry.deletingPathExtension().lastPathComponent,
             ])
         } else {
-            try collectArtifacts(directory: entry, pin: pin, artifacts: &artifacts)
+            try await collectArtifacts(directory: entry, pin: pin, artifacts: &artifacts)
         }
     }
 }

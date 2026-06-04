@@ -15,32 +15,49 @@ private struct RemoteVersionsCache: Codable {
 }
 
 func remoteVersions(location: String, cache: Cache) async throws -> [RemoteVersion] {
-    if let cached = try readCachedRemoteVersions(cache: cache, location: location) {
+    if let cached = try await readCachedRemoteVersions(cache: cache, location: location) {
         return cached
     }
-    let lock = try cache.lock(namespace: "remote-versions", key: location)
+    let lock = try await cache.lock(namespace: "remote-versions", key: location)
     _ = lock
-    if let cached = try readCachedRemoteVersions(cache: cache, location: location) {
+    if let cached = try await readCachedRemoteVersions(cache: cache, location: location) {
         return cached
     }
     let versions = try await fetchRemoteVersions(location: location)
-    try writeCachedRemoteVersions(cache: cache, location: location, versions: versions)
+    try await writeCachedRemoteVersions(cache: cache, location: location, versions: versions)
     return versions
 }
 
 private func fetchRemoteVersions(location: String) async throws -> [RemoteVersion] {
-    let gitVersions = (try? gitRemoteVersions(location: location)) ?? []
+    let repo = try? GitHubRepo(location: location)
+    if let repo, await hasGitHubSession() {
+        let apiVersions = (try? await githubRemoteVersions(repo: repo)) ?? []
+        if !apiVersions.isEmpty {
+            return apiVersions
+        }
+    }
+
+    let gitVersions = (try? await gitRemoteVersions(location: location)) ?? []
     if !gitVersions.isEmpty {
         return gitVersions
     }
-    guard let repo = try? GitHubRepo(location: location) else {
-        return []
-    }
-    return try await githubRemoteVersions(repo: repo)
+    return []
 }
 
-private func gitRemoteVersions(location: String) throws -> [RemoteVersion] {
-    let output = try commandOutput("/usr/bin/git", ["ls-remote", "--tags", location])
+private func gitRemoteVersions(location: String) async throws -> [RemoteVersion] {
+    var lastError: (any Error)?
+    for candidate in sourceControlFetchLocations(location) {
+        do {
+            let output = try await commandOutputAsync("/usr/bin/git", ["ls-remote", "--tags", candidate])
+            return parseGitRemoteVersions(output)
+        } catch {
+            lastError = error
+        }
+    }
+    throw lastError ?? ToolError.message("no source-control locations available for \(location)")
+}
+
+private func parseGitRemoteVersions(_ output: String) -> [RemoteVersion] {
     var peeled: [String: String] = [:]
     var direct: [String: String] = [:]
     for line in output.split(separator: "\n") {
@@ -78,10 +95,10 @@ private func githubRemoteVersions(repo: GitHubRepo) async throws -> [RemoteVersi
     while true {
         let url = URL(string: "https://api.github.com/repos/\(repo.owner)/\(repo.repo)/tags?per_page=100&page=\(page)")!
         var headers = ["User-Agent": "swifterpm/0.1"]
-        if let token = githubToken() {
+        if let token = await githubToken() {
             headers["Authorization"] = "Bearer \(token)"
         }
-        let tags = try JSONDecoder().decode([TagsResponse].self, from: await httpData(url: url, headers: headers))
+        let tags = try JSONDecoder().decode([TagsResponse].self, from: try await httpData(url: url, headers: headers))
         if tags.isEmpty {
             break
         }
@@ -95,14 +112,22 @@ private func githubRemoteVersions(repo: GitHubRepo) async throws -> [RemoteVersi
     return versions.sorted { (try? SemVer($0.version)) ?? SemVer(major: 0, minor: 0, patch: 0) < ((try? SemVer($1.version)) ?? SemVer(major: 0, minor: 0, patch: 0)) }
 }
 
-func resolveNamedRef(location: String, name: String) throws -> String {
-    let output = try commandOutput("/usr/bin/git", ["ls-remote", location, name])
-    guard let line = output.split(separator: "\n").first,
-          let revision = line.split(whereSeparator: \.isWhitespace).first
-    else {
-        throw ToolError.message("\(name) was not found in \(location)")
+func resolveNamedRef(location: String, name: String) async throws -> String {
+    var lastError: (any Error)?
+    for candidate in sourceControlFetchLocations(location) {
+        do {
+            let output = try await commandOutputAsync("/usr/bin/git", ["ls-remote", candidate, name])
+            guard let line = output.split(separator: "\n").first,
+                  let revision = line.split(whereSeparator: \.isWhitespace).first
+            else {
+                throw ToolError.message("\(name) was not found in \(candidate)")
+            }
+            return String(revision)
+        } catch {
+            lastError = error
+        }
     }
-    return String(revision)
+    throw lastError ?? ToolError.message("\(name) was not found in \(location)")
 }
 
 func parseSwiftTagVersion(_ tag: String) -> SemVer? {
@@ -110,23 +135,22 @@ func parseSwiftTagVersion(_ tag: String) -> SemVer? {
     return try? SemVer(value)
 }
 
-private func readCachedRemoteVersions(cache: Cache, location: String) throws -> [RemoteVersion]? {
+private func readCachedRemoteVersions(cache: Cache, location: String) async throws -> [RemoteVersion]? {
     let path = cache.remoteVersionsPath(location: location)
-    guard FileManager.default.fileExists(atPath: path.path) else { return nil }
-    let attrs = try FileManager.default.attributesOfItem(atPath: path.path)
-    if let modified = attrs[.modificationDate] as? Date,
+    guard try await AsyncFileSystem.exists(path) else { return nil }
+    if let modified = try await AsyncFileSystem.modificationDate(path),
        Date().timeIntervalSince(modified) > 60 * 60
     {
         return nil
     }
-    let cached = try JSONDecoder().decode(RemoteVersionsCache.self, from: Data(contentsOf: path))
+    let cached = try JSONDecoder().decode(RemoteVersionsCache.self, from: try await AsyncFileSystem.readData(from: path))
     guard cached.location == location else { return nil }
     return cached.versions
 }
 
-private func writeCachedRemoteVersions(cache: Cache, location: String, versions: [RemoteVersion]) throws {
+private func writeCachedRemoteVersions(cache: Cache, location: String, versions: [RemoteVersion]) async throws {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
     let data = try encoder.encode(RemoteVersionsCache(location: location, versions: versions)) + Data("\n".utf8)
-    try atomicWrite(data, to: cache.remoteVersionsPath(location: location))
+    try await atomicWrite(data, to: cache.remoteVersionsPath(location: location))
 }

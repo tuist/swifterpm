@@ -3,25 +3,23 @@ import Testing
 
 struct ResolveTests {
     @Test
-    func localSourceControlPackageLocationRequiresPackageManifest() throws {
-        let root = try makeTemporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: root) }
+    func localSourceControlPackageLocationRequiresPackageManifest() async throws {
+        try await withTemporaryDirectory { root in
+            #expect(try await localSourceControlPackageLocation(root.path) == nil)
+            try await atomicWrite("package manifest\n", to: root.appendingPathComponent("Package.swift"))
 
-        #expect(localSourceControlPackageLocation(root.path) == nil)
-        try "package manifest\n".write(to: root.appendingPathComponent("Package.swift"), atomically: true, encoding: .utf8)
-
-        #expect(localSourceControlPackageLocation(root.path)?.path == root.path)
-        #expect(sourceControlKind(location: root.path) == "localSourceControl")
-        #expect(sourceControlKind(location: "https://github.com/example/foo") == "remoteSourceControl")
+            #expect(try await localSourceControlPackageLocation(root.path)?.path == root.path)
+            #expect(try await sourceControlKind(location: root.path) == "localSourceControl")
+            #expect(try await sourceControlKind(location: "https://github.com/example/foo") == "remoteSourceControl")
+        }
     }
 
     @Test
-    func localSourceControlPackageLocationAcceptsFileURLs() throws {
-        let root = try makeTemporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: root) }
+    func localSourceControlPackageLocationAcceptsFileURLs() async throws {
+        try await withTemporaryDirectory { root in
+            try await atomicWrite("package manifest\n", to: root.appendingPathComponent("Package.swift"))
 
-        try "package manifest\n".write(to: root.appendingPathComponent("Package.swift"), atomically: true, encoding: .utf8)
-
-        #expect(localSourceControlPackageLocation(root.absoluteString)?.path == root.path)
+            #expect(try await localSourceControlPackageLocation(root.absoluteString)?.path == root.path)
+        }
     }
 }

@@ -20,14 +20,50 @@ struct GitHubRepo: Sendable {
     }
 }
 
-func githubToken() -> String? {
-    let env = ProcessInfo.processInfo.environment
-    if let token = env["GITHUB_TOKEN"] ?? env["GH_TOKEN"], !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-        return token
+private actor GitHubTokenCache {
+    private var loaded = false
+    private var cachedToken: String?
+
+    func token() async -> String? {
+        if loaded {
+            return cachedToken
+        }
+        loaded = true
+
+        let env = ProcessInfo.processInfo.environment
+        if let token = env["GITHUB_TOKEN"] ?? env["GH_TOKEN"],
+           !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
+            cachedToken = token
+            return token
+        }
+
+        guard let output = try? await commandOutputAsync("/usr/bin/env", ["gh", "auth", "token"]) else {
+            return nil
+        }
+        let token = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        cachedToken = token.isEmpty ? nil : token
+        return cachedToken
     }
-    guard let output = try? commandOutput("gh", ["auth", "token"]) else {
-        return nil
+}
+
+private let githubTokenCache = GitHubTokenCache()
+
+func githubToken() async -> String? {
+    await githubTokenCache.token()
+}
+
+func hasGitHubSession() async -> Bool {
+    await githubToken() != nil
+}
+
+func sourceControlFetchLocations(_ location: String) -> [String] {
+    var locations = [location]
+    if let repo = try? GitHubRepo(location: location) {
+        let ssh = "git@github.com:\(repo.owner)/\(repo.repo).git"
+        if !locations.contains(ssh) {
+            locations.append(ssh)
+        }
     }
-    let token = output.trimmingCharacters(in: .whitespacesAndNewlines)
-    return token.isEmpty ? nil : token
+    return locations
 }

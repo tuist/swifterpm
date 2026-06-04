@@ -43,16 +43,19 @@ func writePackageInfoCache(
     quiet: Bool
 ) async throws {
     let cacheDir = customCacheDir ?? scratchDir.appendingPathComponent("swifterpm/package-info")
-    let scratchLock = try PathLock(path: scratchDir.appendingPathComponent(".swifterpm.lock"))
-    let cacheLock = try PathLock(path: cacheDir.appendingPathComponent(".swifterpm.lock"))
+    let scratchLock = try await pathLock(at: scratchDir.appendingPathComponent(".swifterpm.lock"))
+    let cacheLock = try await pathLock(at: cacheDir.appendingPathComponent(".swifterpm.lock"))
     _ = scratchLock
     _ = cacheLock
 
-    try FileManager.default.createDirectory(at: cacheDir.appendingPathComponent("packages"), withIntermediateDirectories: true)
+    try await AsyncFileSystem.createDirectory(
+        at: cacheDir.appendingPathComponent("packages"),
+        withIntermediateDirectories: true
+    )
 
     let rootPath = cacheDir.appendingPathComponent("root.json")
-    try writeDumpPackageJSON(packageDir: packageDir, destination: rootPath, disableSandbox: disableSandbox)
-    let rootManifest = try JSONSerialization.jsonObject(with: Data(contentsOf: rootPath))
+    try await writeDumpPackageJSON(packageDir: packageDir, destination: rootPath, disableSandbox: disableSandbox)
+    let rootManifest = try JSONSerialization.jsonObject(with: try await AsyncFileSystem.readData(from: rootPath))
 
     let packagePins = resolved.pins
         .filter { isSourceControlKind($0.kind) || isRegistryKind($0.kind) }
@@ -65,7 +68,7 @@ func writePackageInfoCache(
                 let packageInfoPath = cacheDir
                     .appendingPathComponent("packages")
                     .appendingPathComponent("\(fileSafeName(pin.identity))-\(entryHash(pin)).json")
-                try writeDumpPackageJSON(packageDir: packagePath, destination: packageInfoPath, disableSandbox: disableSandbox)
+                try await writeDumpPackageJSON(packageDir: packagePath, destination: packageInfoPath, disableSandbox: disableSandbox)
                 return packageEntry(pin: pin, packagePath: packagePath, packageInfoPath: packageInfoPath)
             }
         }
@@ -84,7 +87,7 @@ func writePackageInfoCache(
         let packageInfoPath = cacheDir
             .appendingPathComponent("packages")
             .appendingPathComponent("\(fileSafeName(dependency.identity))-\(String(stableHash(dependency.path).prefix(16))).json")
-        try writeDumpPackageJSON(packageDir: packagePath, destination: packageInfoPath, disableSandbox: disableSandbox)
+        try await writeDumpPackageJSON(packageDir: packagePath, destination: packageInfoPath, disableSandbox: disableSandbox)
         allPackages.append(PackageInfoEntry(
             identity: dependency.identity,
             kind: "fileSystem",
@@ -112,7 +115,7 @@ func writePackageInfoCache(
     )
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-    try atomicWrite(try encoder.encode(index) + Data("\n".utf8), to: cacheDir.appendingPathComponent("index.json"))
+    try await atomicWrite(try encoder.encode(index) + Data("\n".utf8), to: cacheDir.appendingPathComponent("index.json"))
 
     if !quiet {
         print("cached package manifest JSON into \(cacheDir.path)")
@@ -130,9 +133,9 @@ private func packagePathForPin(scratchDir: URL, pin: ResolvedPin) throws -> URL 
         .appendingPathComponent(checkoutDirectoryName(pin))
 }
 
-private func writeDumpPackageJSON(packageDir: URL, destination: URL, disableSandbox: Bool) throws {
-    let data = try dumpPackageJSON(packageDir: packageDir, disableSandbox: disableSandbox)
-    try atomicWrite(data, to: destination)
+private func writeDumpPackageJSON(packageDir: URL, destination: URL, disableSandbox: Bool) async throws {
+    let data = try await dumpPackageJSON(packageDir: packageDir, disableSandbox: disableSandbox)
+    try await atomicWrite(data, to: destination)
 }
 
 private func packageEntry(pin: ResolvedPin, packagePath: URL, packageInfoPath: URL) -> PackageInfoEntry {

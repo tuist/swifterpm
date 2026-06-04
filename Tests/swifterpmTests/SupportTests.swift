@@ -11,14 +11,14 @@ struct SupportTests {
     }
 
     @Test
-    func atomicWriteCreatesParentDirectories() throws {
-        let root = try makeTemporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: root) }
+    func atomicWriteCreatesParentDirectories() async throws {
+        try await withTemporaryDirectory { root in
+            let path = root.appendingPathComponent("nested/file.txt")
+            try await atomicWrite("hello", to: path)
 
-        let path = root.appendingPathComponent("nested/file.txt")
-        try atomicWrite("hello", to: path)
-
-        #expect(try String(contentsOf: path, encoding: .utf8) == "hello")
+            let data = try await AsyncFileSystem.readData(from: path)
+            #expect(String(data: data, encoding: .utf8) == "hello")
+        }
     }
 
     @Test
@@ -30,35 +30,33 @@ struct SupportTests {
     }
 
     @Test
-    func filesystemHelpersFlattenAndSymlinkDirectoryContents() throws {
-        let root = try makeTemporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: root) }
+    func filesystemHelpersFlattenAndSymlinkDirectoryContents() async throws {
+        try await withTemporaryDirectory { root in
+            let source = root.appendingPathComponent("source")
+            let nested = root.appendingPathComponent("outer/nested")
+            try await AsyncFileSystem.createDirectory(at: source, withIntermediateDirectories: true)
+            try await AsyncFileSystem.createDirectory(at: nested, withIntermediateDirectories: true)
+            try await atomicWrite("value", to: source.appendingPathComponent("file.txt"))
+            try await atomicWrite("nested", to: nested.appendingPathComponent("nested.txt"))
 
-        let source = root.appendingPathComponent("source")
-        let nested = root.appendingPathComponent("outer/nested")
-        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
-        try atomicWrite("value", to: source.appendingPathComponent("file.txt"))
-        try atomicWrite("nested", to: nested.appendingPathComponent("nested.txt"))
+            try await flattenSingleDirectory(root.appendingPathComponent("outer"))
+            #expect(try await AsyncFileSystem.exists(root.appendingPathComponent("outer/nested.txt")))
 
-        try flattenSingleDirectory(root.appendingPathComponent("outer"))
-        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("outer/nested.txt").path))
-
-        let destination = root.appendingPathComponent("destination")
-        try replaceWithSymlinkedDirectoryContents(source: source, destination: destination)
-        #expect(pathExistsOrIsSymlink(destination.appendingPathComponent("file.txt")))
-        #expect(!isDirectoryAndNotSymlink(destination.appendingPathComponent("file.txt")))
+            let destination = root.appendingPathComponent("destination")
+            try await replaceWithSymlinkedDirectoryContents(source: source, destination: destination)
+            #expect(try await pathExistsOrIsSymlink(destination.appendingPathComponent("file.txt")))
+            #expect(!(try await isDirectoryAndNotSymlink(destination.appendingPathComponent("file.txt"))))
+        }
     }
 
     @Test
-    func temporaryDirectoryAndFileSafeNameUseScopedPaths() throws {
-        let root = try makeTemporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: root) }
+    func temporaryDirectoryAndFileSafeNameUseScopedPaths() async throws {
+        try await withTemporaryDirectory { root in
+            let temp = try await temporaryDirectory(in: root)
 
-        let temp = try temporaryDirectory(in: root)
-
-        #expect(temp.path.hasPrefix(root.path))
-        #expect(FileManager.default.fileExists(atPath: temp.path))
-        #expect(fileSafeName("a/b:c") == "a_b_c")
+            #expect(temp.path.hasPrefix(root.path))
+            #expect(try await AsyncFileSystem.exists(temp))
+            #expect(fileSafeName("a/b:c") == "a_b_c")
+        }
     }
 }
