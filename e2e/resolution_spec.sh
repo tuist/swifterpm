@@ -1,4 +1,5 @@
-# End-to-end resolver tests against real-world Package.swift fixtures.
+# End-to-end resolver tests against real-world Package.swift fixtures and
+# SwiftPM's dependency-resolution graph fixtures.
 #
 # Each scenario pins an upstream repository to a specific commit, downloads the
 # manifest file via raw.githubusercontent.com, resolves it with swifterpm, and
@@ -15,6 +16,8 @@ POCKET_CASTS_MANIFEST_PATH="Modules/Package.swift"
 FIREFOX_IOS_REPO="mozilla-mobile/firefox-ios"
 FIREFOX_IOS_SHA="d97982a167c3e15393607e027eca7f92b53dcad8"
 FIREFOX_IOS_MANIFEST_PATH="Package.swift"
+
+SWIFTPM_FIXTURES="${PWD}/e2e/fixtures/swiftpm/DependencyResolution/External"
 
 isolated_workspace() {
   # Stand up a temp tree with the manifest copied in. Returns the package
@@ -38,6 +41,36 @@ isolated_workspace() {
   echo "${package_dir}"
 }
 
+copy_swiftpm_fixture() {
+  local name="$1"
+  local tmp="$2"
+  local fixture_dir="${tmp}/${name}"
+
+  cp -R "${SWIFTPM_FIXTURES}/${name}" "${fixture_dir}"
+  echo "${fixture_dir}"
+}
+
+init_git_package() {
+  local package_dir="$1"
+
+  git -C "${package_dir}" init >/dev/null
+  git -C "${package_dir}" checkout -B main >/dev/null 2>&1
+  git -C "${package_dir}" config user.email "swifterpm-e2e@example.com"
+  git -C "${package_dir}" config user.name "swifterpm e2e"
+  git -C "${package_dir}" add .
+  git -C "${package_dir}" commit -m "Initial import" >/dev/null
+}
+
+tag_git_package() {
+  local package_dir="$1"
+  shift
+
+  local tag
+  for tag in "$@"; do
+    git -C "${package_dir}" tag "${tag}"
+  done
+}
+
 resolve_package() {
   local package_dir="$1"
   local cache_dir="$2"
@@ -55,7 +88,7 @@ swiftpm_accepts_lockfile() {
   local cache_dir="$2"
   swift package \
     --package-path "${package_dir}" \
-    --scratch-path "${package_dir}/.build" \
+    --scratch-path "${cache_dir}/scratch" \
     --cache-path "${cache_dir}" \
     --disable-scm-to-registry-transformation \
     --force-resolved-versions \
@@ -65,6 +98,20 @@ swiftpm_accepts_lockfile() {
 pin_count() {
   local package_dir="$1"
   jq '.pins | length' "${package_dir}/Package.resolved"
+}
+
+pin_state_value() {
+  local package_dir="$1"
+  local identity="$2"
+  local field="$3"
+  jq -r --arg identity "${identity}" --arg field "${field}" \
+    '.pins[] | select(.identity == $identity) | .state[$field] // ""' \
+    "${package_dir}/Package.resolved"
+}
+
+resolved_identities() {
+  local package_dir="$1"
+  jq -r '.pins[].identity' "${package_dir}/Package.resolved" | sort | tr '\n' ' ' | sed 's/ $//'
 }
 
 scenario_resolves_firefox_ios() {
@@ -105,6 +152,89 @@ scenario_resolves_pocket_casts_ios() {
   echo "force-resolve=ok"
 }
 
+scenario_resolves_swiftpm_external_simple() {
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "${tmp}"' RETURN
+
+  local fixture_dir
+  fixture_dir="$(copy_swiftpm_fixture "Simple" "${tmp}")" || return 1
+
+  init_git_package "${fixture_dir}/Foo" || return 1
+  tag_git_package "${fixture_dir}/Foo" "1.0.0" "1.1.0" "1.2.0" "1.2.3" || return 1
+
+  local package_dir="${fixture_dir}/Bar"
+  resolve_package "${package_dir}" "${tmp}/cache" || return 1
+  swiftpm_accepts_lockfile "${package_dir}" "${tmp}/swift-cache" || return 1
+
+  echo "pins=$(pin_count "${package_dir}")"
+  echo "foo-version=$(pin_state_value "${package_dir}" "foo" "version")"
+  echo "force-resolve=ok"
+}
+
+scenario_resolves_swiftpm_external_complex() {
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "${tmp}"' RETURN
+
+  local fixture_dir
+  fixture_dir="$(copy_swiftpm_fixture "Complex" "${tmp}")" || return 1
+
+  local package
+  for package in "FisherYates" "PlayingCard" "deck-of-playing-cards"; do
+    init_git_package "${fixture_dir}/${package}" || return 1
+    tag_git_package "${fixture_dir}/${package}" "1.0.0" || return 1
+  done
+
+  local package_dir="${fixture_dir}/app"
+  resolve_package "${package_dir}" "${tmp}/cache" || return 1
+  swiftpm_accepts_lockfile "${package_dir}" "${tmp}/swift-cache" || return 1
+
+  echo "pins=$(pin_count "${package_dir}")"
+  echo "identities=$(resolved_identities "${package_dir}")"
+  echo "force-resolve=ok"
+}
+
+scenario_resolves_swiftpm_branch_dependency() {
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "${tmp}"' RETURN
+
+  local fixture_dir
+  fixture_dir="$(copy_swiftpm_fixture "Branch" "${tmp}")" || return 1
+
+  init_git_package "${fixture_dir}/Foo" || return 1
+
+  local package_dir="${fixture_dir}/Bar"
+  resolve_package "${package_dir}" "${tmp}/cache" || return 1
+  swiftpm_accepts_lockfile "${package_dir}" "${tmp}/swift-cache" || return 1
+
+  local revision
+  revision="$(pin_state_value "${package_dir}" "foo" "revision")"
+  test -n "${revision}" || return 1
+
+  echo "pins=$(pin_count "${package_dir}")"
+  echo "foo-branch=$(pin_state_value "${package_dir}" "foo" "branch")"
+  echo "foo-revision=present"
+  echo "force-resolve=ok"
+}
+
+scenario_resolves_swiftpm_local_case_insensitive_dependency() {
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "${tmp}"' RETURN
+
+  local fixture_dir
+  fixture_dir="$(copy_swiftpm_fixture "PackageLookupCaseInsensitive" "${tmp}")" || return 1
+
+  local package_dir="${fixture_dir}/pkg"
+  resolve_package "${package_dir}" "${tmp}/cache" || return 1
+  swiftpm_accepts_lockfile "${package_dir}" "${tmp}/swift-cache" || return 1
+
+  echo "pins=$(pin_count "${package_dir}")"
+  echo "force-resolve=ok"
+}
+
 Describe "swifterpm resolve against real-world manifests"
   It "resolves Firefox iOS root Package.swift and emits a SwiftPM-acceptable lockfile"
     When call scenario_resolves_firefox_ios
@@ -117,6 +247,40 @@ Describe "swifterpm resolve against real-world manifests"
     When call scenario_resolves_pocket_casts_ios
     The status should be success
     The output should match pattern "pins=*"
+    The output should include "force-resolve=ok"
+  End
+End
+
+Describe "swifterpm resolve against SwiftPM dependency graph fixtures"
+  It "matches SwiftPM's external simple version-selection scenario"
+    When call scenario_resolves_swiftpm_external_simple
+    The status should be success
+    The output should include "pins=1"
+    The output should include "foo-version=1.2.3"
+    The output should include "force-resolve=ok"
+  End
+
+  It "matches SwiftPM's external complex transitive graph scenario"
+    When call scenario_resolves_swiftpm_external_complex
+    The status should be success
+    The output should include "pins=3"
+    The output should include "identities=deck-of-playing-cards fisheryates playingcard"
+    The output should include "force-resolve=ok"
+  End
+
+  It "matches SwiftPM's branch dependency scenario"
+    When call scenario_resolves_swiftpm_branch_dependency
+    The status should be success
+    The output should include "pins=1"
+    The output should include "foo-branch=main"
+    The output should include "foo-revision=present"
+    The output should include "force-resolve=ok"
+  End
+
+  It "matches SwiftPM's local case-insensitive package lookup scenario"
+    When call scenario_resolves_swiftpm_local_case_insensitive_dependency
+    The status should be success
+    The output should include "pins=0"
     The output should include "force-resolve=ok"
   End
 End
