@@ -10,68 +10,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  CARGO_TERM_COLOR: always
-  CARGO_INCREMENTAL: "0"
-  CARGO_NET_RETRY: "10"
-  RUSTUP_MAX_RETRIES: "10"
   MISE_VERSION: "2026.4.18"
   MISE_GITHUB_ATTESTATIONS: "0"
-  RUST_BACKTRACE: "1"
 
 jobs:
-  formatted:
-    name: formatted
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - name: Install mise tools
-        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
-        with:
-          version: ${{ env.MISE_VERSION }}
-          cache: true
-          install_args: rust
-
-      - name: Install rustfmt
-        run: rustup component add rustfmt
-
-      - name: Cache Rust
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
-        with:
-          shared-key: formatted
-          cache-on-failure: true
-          cache-bin: true
-
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-  test:
-    name: test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, macos-15, windows-latest]
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - name: Install mise tools
-        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
-        with:
-          version: ${{ env.MISE_VERSION }}
-          cache: true
-          install_args: rust
-
-      - name: Cache Rust
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
-        with:
-          shared-key: test-${{ matrix.os }}
-          cache-on-failure: true
-          cache-bin: true
-
-      - name: Run tests
-        run: cargo test --locked --all-targets
-
   e2e:
     name: e2e
     runs-on: macos-15
@@ -83,25 +25,14 @@ jobs:
         with:
           version: ${{ env.MISE_VERSION }}
           cache: true
-          install_args: rust shellspec jq
-
-      - name: Cache Rust
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
-        with:
-          shared-key: e2e
-          cache-on-failure: true
-          cache-bin: true
+          install_args: bazel shellspec jq
 
       - name: Run e2e tests
         run: mise run test:e2e
 
   build:
-    name: build (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, macos-15, windows-latest]
+    name: build
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
@@ -110,14 +41,7 @@ jobs:
         with:
           version: ${{ env.MISE_VERSION }}
           cache: true
-          install_args: rust
+          install_args: bazel
 
-      - name: Cache Rust
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
-        with:
-          shared-key: build-${{ matrix.os }}
-          cache-on-failure: true
-          cache-bin: true
-
-      - name: Build release binary
-        run: cargo build --locked --release
+      - name: Build
+        run: bazel build //:swifterpm //:swifterpm_macos
