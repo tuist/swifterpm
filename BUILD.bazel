@@ -1,0 +1,35 @@
+load("@build_bazel_rules_swift//swift:swift.bzl", "swift_binary", "swift_library")
+load("@rules_apple//apple:macos.bzl", "macos_command_line_application")
+load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
+
+swift_library(
+    name = "swifterpm_sources",
+    srcs = glob([
+        "Sources/swifterpm/*.swift",
+    ]),
+    visibility = ["//visibility:private"],
+)
+
+swift_binary(
+    name = "swifterpm",
+    srcs = glob([
+        "Sources/swifterpm/*.swift",
+    ]),
+    visibility = ["//visibility:public"],
+)
+
+apple_bundle_version(
+    name = "swifterpm_version",
+    build_version = "0.1.0",
+    short_version_string = "0.1.0",
+)
+
+macos_command_line_application(
+    name = "swifterpm_macos",
+    bundle_id = "dev.tuist.swifterpm",
+    infoplists = [":Info.plist"],
+    minimum_os_version = "15.0",
+    version = ":swifterpm_version",
+    deps = [":swifterpm_sources"],
+    visibility = ["//visibility:public"],
+)

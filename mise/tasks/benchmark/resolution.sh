@@ -2,7 +2,7 @@
 #MISE description="Benchmark SwiftPM resolution against swifterpm on real iOS repositories"
 #USAGE flag "--runs <runs>" help="Number of hyperfine runs per benchmark" default="3"
 #USAGE flag "--output-dir <output-dir>" help="Directory where benchmark reports are written" default="benchmark-results"
-#USAGE flag "--swifterpm-bin <swifterpm-bin>" help="Path to a swifterpm executable. Defaults to target/release/swifterpm"
+#USAGE flag "--swifterpm-bin <swifterpm-bin>" help="Path to a swifterpm executable. Defaults to bazel-bin/swifterpm"
 set -euo pipefail
 
 runs="3"
@@ -30,7 +30,7 @@ while (($# > 0)); do
   esac
 done
 
-for tool in git hyperfine swift; do
+for tool in bazel git hyperfine swift; do
   if ! command -v "${tool}" >/dev/null 2>&1; then
     echo "${tool} is required" >&2
     exit 1
@@ -38,8 +38,8 @@ for tool in git hyperfine swift; do
 done
 
 if [[ -z "${swifterpm_bin}" ]]; then
-  cargo build --locked --release
-  swifterpm_bin="${PWD}/target/release/swifterpm"
+  bazel build //:swifterpm
+  swifterpm_bin="${PWD}/bazel-bin/swifterpm"
 fi
 
 if [[ ! -x "${swifterpm_bin}" ]]; then

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #MISE description="Build and package a release archive for a target triple"
-#USAGE flag "--target <target>" help="Rust target triple to compile"
+#USAGE flag "--target <target>" help="Target triple to include in the release asset name"
 #USAGE flag "--version <version>" help="Version number to embed in the asset name"
 set -euo pipefail
 
@@ -35,7 +35,7 @@ mask_ci_value() {
 }
 
 mkdir -p dist
-SWIFTERPM_VERSION="${version}" cargo build --locked --release --target "${target}"
+bazel build //:swifterpm
 
 case "${target}" in
   *-windows-*)
@@ -48,7 +48,7 @@ esac
 
 stage_dir="$(mktemp -d)"
 trap 'rm -rf "${stage_dir}"' EXIT
-cp "target/${target}/release/${bin_name}" "${stage_dir}/${bin_name}"
+cp "bazel-bin/swifterpm" "${stage_dir}/${bin_name}"
 
 if [[ "${target}" == *-apple-darwin && "${SWIFTERPM_SIGN_MACOS:-}" == "true" ]]; then
   keychain_path="${stage_dir}/signing.keychain"

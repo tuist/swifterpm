@@ -1,6 +1,10 @@
 /target
 /dist
 /.build
+/bazel-*
+/bazel-bin
+/bazel-out
+/bazel-testlogs
 /benchmark-results
 /server
 /xcode_processor
