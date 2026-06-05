@@ -144,41 +144,48 @@ enum Hashing {
 private let defaultParallelism = max(4, min(32, ProcessInfo.processInfo.activeProcessorCount * 4))
 
 enum ConcurrentTasks {
-    static func map<Element: Sendable, Result: Sendable>(
+    static func map<Element: Sendable, Output: Sendable>(
         _ elements: [Element],
         maxConcurrentTasks: Int = defaultParallelism,
-        operation: @Sendable @escaping (Element) async throws -> Result
-    ) async throws -> [Result] {
+        operation: @Sendable @escaping (Element) async throws -> Output
+    ) async throws -> [Output] {
         guard !elements.isEmpty else { return [] }
         let limit = max(1, min(maxConcurrentTasks, elements.count))
 
-        return try await withThrowingTaskGroup(of: Result.self) { group in
-            var iterator = elements.makeIterator()
+        return try await withThrowingTaskGroup(of: (Int, Output).self) { group in
+            var iterator = elements.enumerated().makeIterator()
             var activeTasks = 0
-            var results: [Result] = []
-            results.reserveCapacity(elements.count)
+            var results = Array<Output?>(repeating: nil, count: elements.count)
 
-            while activeTasks < limit, let element = iterator.next() {
+            while activeTasks < limit, let (index, element) = iterator.next() {
                 group.addTask {
-                    try await operation(element)
+                    (index, try await operation(element))
                 }
                 activeTasks += 1
             }
 
             while activeTasks > 0 {
-                guard let result = try await group.next() else { break }
+                guard let (index, result) = try await group.next() else { break }
                 activeTasks -= 1
-                results.append(result)
+                results[index] = result
 
-                if let element = iterator.next() {
+                if let (index, element) = iterator.next() {
                     group.addTask {
-                        try await operation(element)
+                        (index, try await operation(element))
                     }
                     activeTasks += 1
                 }
             }
 
-            return results
+            var ordered: [Output] = []
+            ordered.reserveCapacity(elements.count)
+            for result in results {
+                guard let result else {
+                    throw ToolError.message("concurrent task result missing")
+                }
+                ordered.append(result)
+            }
+            return ordered
         }
     }
 

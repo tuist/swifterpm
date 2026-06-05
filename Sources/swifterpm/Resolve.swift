@@ -192,33 +192,21 @@ enum PackageResolver {
                 return
             }
 
-            let fetched = try await withThrowingTaskGroup(of: (PackageKey, [ResolvedVersion]).self)
-            {
-                group in
-                for package in missing {
-                    let cache = cache
-                    let registryConfig = registryConfig
-                    let progress = progress
-                    group.addTask {
-                        progress?.startedFetchingVersions(package: package.identity)
-                        let versions = try await Self.fetchResolvedVersions(
-                            package: package,
-                            cache: cache,
-                            registryConfig: registryConfig
-                        )
-                        progress?.finishedFetchingVersions(
-                            package: package.identity,
-                            versionCount: versions.count
-                        )
-                        return (package, versions)
-                    }
-                }
-
-                var result: [(PackageKey, [ResolvedVersion])] = []
-                for try await item in group {
-                    result.append(item)
-                }
-                return result
+            let cache = self.cache
+            let registryConfig = self.registryConfig
+            let progress = self.progress
+            let fetched = try await ConcurrentTasks.map(missing) { package in
+                progress?.startedFetchingVersions(package: package.identity)
+                let versions = try await Self.fetchResolvedVersions(
+                    package: package,
+                    cache: cache,
+                    registryConfig: registryConfig
+                )
+                progress?.finishedFetchingVersions(
+                    package: package.identity,
+                    versionCount: versions.count
+                )
+                return (package, versions)
             }
 
             for (package, resolved) in fetched where versions[package] == nil {
@@ -467,7 +455,7 @@ enum PackageResolver {
         guard try await AsyncFileSystem.exists(url.appendingPathComponent("Package.swift")) else {
             return nil
         }
-        return url.standardizedFileURL.resolvingSymlinksInPath()
+        return url.standardizedFileURL
     }
 
     static func sourceControlKind(location: String) async throws -> String {

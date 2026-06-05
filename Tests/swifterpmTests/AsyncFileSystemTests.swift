@@ -26,11 +26,19 @@ struct AsyncFileSystemTests {
         try await withTemporaryDirectory { root in
             let target = root.appendingPathComponent("target.txt")
             let link = root.appendingPathComponent("link.txt")
+            let targetDirectory = root.appendingPathComponent("target-directory")
+            let directoryLink = root.appendingPathComponent("directory-link")
             try await AsyncFileSystem.writeData(Data("target".utf8), to: target)
+            try await AsyncFileSystem.createDirectory(
+                at: targetDirectory, withIntermediateDirectories: true)
             try await AsyncFileSystem.createSymbolicLink(at: link, withDestinationURL: target)
+            try await AsyncFileSystem.createSymbolicLink(
+                at: directoryLink, withDestinationURL: targetDirectory)
 
             #expect(try await AsyncFileSystem.exists(link))
             #expect(!(try await AsyncFileSystem.isDirectoryAndNotSymlink(link)))
+            #expect(try await AsyncFileSystem.isDirectory(directoryLink))
+            #expect(!(try await AsyncFileSystem.isDirectoryAndNotSymlink(directoryLink)))
             #expect(!(try await AsyncFileSystem.currentDirectoryPath()).isEmpty)
         }
     }

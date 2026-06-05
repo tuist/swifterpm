@@ -1,6 +1,29 @@
 import Foundation
 
 enum WorkspaceRestorer {
+    private struct DiscoveredArtifact: Sendable {
+        let pinIdentity: String
+        let pinKind: String
+        let pinLocation: String
+        let pinName: String
+        let path: String
+        let targetName: String
+
+        var workspaceStateDictionary: [String: Any] {
+            [
+                "kind": ["xcframework": [:]],
+                "packageRef": [
+                    "identity": pinIdentity,
+                    "kind": pinKind,
+                    "location": pinLocation,
+                    "name": pinName,
+                ],
+                "path": path,
+                "targetName": targetName,
+            ]
+        }
+    }
+
     static func restorePackage(
         scratchDir: URL,
         cache: Cache,
@@ -287,6 +310,7 @@ enum WorkspaceRestorer {
     ) async throws {
         var dependencies: [[String: Any]] = []
         var artifacts: [[String: Any]] = []
+        var artifactPins: [ResolvedPin] = []
         let hasArtifactsRoot = try await AsyncFileSystem.exists(
             scratchDir.appendingPathComponent("artifacts"))
 
@@ -310,8 +334,7 @@ enum WorkspaceRestorer {
                     "subpath": PinKind.checkoutDirectoryName(pin),
                 ])
                 if hasArtifactsRoot {
-                    artifacts.append(
-                        contentsOf: try await discoverArtifacts(scratchDir: scratchDir, pin: pin))
+                    artifactPins.append(pin)
                 }
             } else if PinKind.isRegistry(pin.kind) {
                 dependencies.append([
@@ -329,10 +352,18 @@ enum WorkspaceRestorer {
                     "subpath": try PinKind.registryDownloadSubpath(pin),
                 ])
                 if hasArtifactsRoot {
-                    artifacts.append(
-                        contentsOf: try await discoverArtifacts(scratchDir: scratchDir, pin: pin))
+                    artifactPins.append(pin)
                 }
             }
+        }
+
+        if hasArtifactsRoot {
+            let discoveredArtifacts = try await ConcurrentTasks.map(artifactPins) { pin in
+                try await discoverArtifacts(scratchDir: scratchDir, pin: pin)
+            }
+            artifacts = discoveredArtifacts
+                .flatMap { $0 }
+                .map(\.workspaceStateDictionary)
         }
 
         let manifest = try await ManifestLoader.dumpPackage(
@@ -370,39 +401,40 @@ enum WorkspaceRestorer {
     }
 
     private static func discoverArtifacts(scratchDir: URL, pin: ResolvedPin) async throws
-        -> [[String:
-        Any]]
+        -> [DiscoveredArtifact]
     {
         let artifactsDir = scratchDir.appendingPathComponent("artifacts").appendingPathComponent(
             pin.identity)
         guard try await AsyncFileSystem.exists(artifactsDir) else {
             return []
         }
-        var artifacts: [[String: Any]] = []
-        try await collectArtifacts(directory: artifactsDir, pin: pin, artifacts: &artifacts)
-        return artifacts
+        return try await collectArtifacts(directory: artifactsDir, pin: pin)
     }
 
     private static func collectArtifacts(
-        directory: URL, pin: ResolvedPin, artifacts: inout [[String: Any]]
-    ) async throws {
-        for entry in try await AsyncFileSystem.contentsOfDirectory(at: directory) {
-            guard try await AsyncFileSystem.isDirectoryAndNotSymlink(entry) else { continue }
-            if entry.pathExtension == "xcframework" {
-                artifacts.append([
-                    "kind": ["xcframework": [:]],
-                    "packageRef": [
-                        "identity": pin.identity,
-                        "kind": pin.kind,
-                        "location": pin.location,
-                        "name": PinKind.checkoutDirectoryName(pin),
-                    ],
-                    "path": entry.path,
-                    "targetName": entry.deletingPathExtension().lastPathComponent,
-                ])
-            } else {
-                try await collectArtifacts(directory: entry, pin: pin, artifacts: &artifacts)
+        directory: URL, pin: ResolvedPin
+    ) async throws -> [DiscoveredArtifact] {
+        let entries = try await AsyncFileSystem.contentsOfDirectory(at: directory)
+        let sortedEntries = entries.sorted { $0.path < $1.path }
+        let nestedArtifacts = try await ConcurrentTasks.map(sortedEntries) {
+            entry -> [DiscoveredArtifact] in
+            guard try await AsyncFileSystem.isDirectoryAndNotSymlink(entry) else {
+                return []
             }
+            if entry.pathExtension == "xcframework" {
+                return [
+                    DiscoveredArtifact(
+                        pinIdentity: pin.identity,
+                        pinKind: pin.kind,
+                        pinLocation: pin.location,
+                        pinName: PinKind.checkoutDirectoryName(pin),
+                        path: entry.path,
+                        targetName: entry.deletingPathExtension().lastPathComponent
+                    )
+                ]
+            }
+            return try await collectArtifacts(directory: entry, pin: pin)
         }
+        return nestedArtifacts.flatMap { $0 }
     }
 }

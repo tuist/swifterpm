@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 struct CLITests {
@@ -72,6 +73,48 @@ struct CLITests {
         #expect(options.packageDir.path == "/tmp/package")
         #expect(options.cacheDir?.path == "/tmp/cache")
         #expect(options.scratchDir?.path == "/tmp/scratch")
+    }
+
+    @Test
+    func pathResolverResolvesRelativePathsAgainstChdirWithoutChangingProcessDirectory()
+        async throws
+    {
+        try await withTemporaryDirectory { root in
+            let workspace = root.appendingPathComponent("workspace")
+            try await AsyncFileSystem.createDirectory(
+                at: workspace, withIntermediateDirectories: true)
+
+            let originalDirectory = try await AsyncFileSystem.currentDirectoryPath()
+            let cli = try CLIParser.parse([
+                "--chdir", workspace.path,
+                "restore",
+                "--package-dir", "Package",
+            ])
+            guard case .restore(let options) = cli.command else {
+                Issue.record("expected restore command")
+                return
+            }
+            let resolver = try await CLIPathResolver(chdir: cli.chdir)
+            let resolvedWorkspace = workspace.standardizedFileURL
+
+            #expect(resolver.baseDirectory.path == resolvedWorkspace.path)
+            #expect(
+                resolver.resolve(options.packageDir).path
+                    == resolvedWorkspace.appendingPathComponent("Package").path)
+            #expect(resolver.resolve(CLIPath("/tmp/cache")).path == "/tmp/cache")
+            #expect(try await AsyncFileSystem.currentDirectoryPath() == originalDirectory)
+        }
+    }
+
+    @Test
+    func pathResolverRejectsMissingChdir() async throws {
+        try await withTemporaryDirectory { root in
+            let missing = root.appendingPathComponent("missing")
+
+            await #expect(throws: (any Error).self) {
+                try await CLIPathResolver(chdir: CLIPath(missing.path))
+            }
+        }
     }
 
     @Test

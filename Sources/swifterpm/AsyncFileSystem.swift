@@ -19,6 +19,10 @@ enum AsyncFileSystem {
         try await info(for: url, infoAboutSymbolicLink: true)?.type == .directory
     }
 
+    static func isDirectory(_ url: URL) async throws -> Bool {
+        try await info(for: url, infoAboutSymbolicLink: false)?.type == .directory
+    }
+
     static func isRegularFile(_ url: URL) async throws -> Bool {
         try await info(for: url, infoAboutSymbolicLink: false)?.type == .regular
     }
