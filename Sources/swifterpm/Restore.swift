@@ -12,6 +12,10 @@ enum WorkspaceRestorer {
         let kind: [String: Any]
     }
 
+    private struct WorkspaceArtifact: @unchecked Sendable {
+        let value: [String: Any]
+    }
+
     static func restorePackage(
         scratchDir: URL,
         packageDir: URL? = nil,
@@ -94,7 +98,7 @@ enum WorkspaceRestorer {
                 disableSandbox: disableSandbox
             )
             let binaryTargets = try ManifestParser.binaryTargets(manifest)
-            for target in binaryTargets {
+            try await ConcurrentTasks.forEach(binaryTargets) { target in
                 try await restoreBinaryArtifact(
                     target,
                     context: context,
@@ -284,7 +288,10 @@ enum WorkspaceRestorer {
                 disableSandbox: disableSandbox
             )
             for dependency in try ManifestParser.fileSystemDependencies(manifest) {
-                let dependencyPath = URL(fileURLWithPath: dependency.path)
+                let dependencyPath = packagePathForFileSystemDependency(
+                    rootPackageDir: packageDir,
+                    dependency: dependency
+                )
                 let dependencyManifest = try await ManifestLoader.dumpPackage(
                     packageDir: dependencyPath,
                     disableSandbox: disableSandbox
@@ -305,10 +312,15 @@ enum WorkspaceRestorer {
             guard PinKind.isSourceControl(pin.kind) || PinKind.isRegistry(pin.kind) else {
                 continue
             }
+            let packagePath = try packagePathForPin(scratchDir: scratchDir, pin: pin)
             contexts.append(
                 PackageContext(
-                    packageRef: try packageRef(pin),
-                    packagePath: try packagePathForPin(scratchDir: scratchDir, pin: pin),
+                    packageRef: try await packageRef(
+                        pin,
+                        packagePath: packagePath,
+                        disableSandbox: disableSandbox
+                    ),
+                    packagePath: packagePath,
                     canonicalizeLocalBinaryPaths: false
                 ))
         }
@@ -324,6 +336,18 @@ enum WorkspaceRestorer {
             "location": canonical.path,
             "name": canonical.lastPathComponent,
         ]
+    }
+
+    private static func packagePathForFileSystemDependency(
+        rootPackageDir: URL,
+        dependency: ManifestFileSystemDependency
+    ) -> URL {
+        if dependency.path.hasPrefix("/") {
+            return URL(fileURLWithPath: dependency.path)
+        }
+        return rootPackageDir
+            .appendingPathComponent(dependency.path)
+            .standardizedFileURL
     }
 
     private static func fileSystemPackageRef(
@@ -355,6 +379,30 @@ enum WorkspaceRestorer {
             "location": pin.location,
             "name": PinKind.checkoutDirectoryName(pin),
         ]
+    }
+
+    private static func packageRef(
+        _ pin: ResolvedPin,
+        packagePath: URL,
+        disableSandbox: Bool
+    ) async throws -> [String: String] {
+        var ref = try packageRef(pin)
+        guard PinKind.isSourceControl(pin.kind) else {
+            return ref
+        }
+        let manifestPath = packagePath.appendingPathComponent("Package.swift")
+        guard try await AsyncFileSystem.exists(manifestPath) else {
+            return ref
+        }
+
+        let manifest = try await ManifestLoader.dumpPackage(
+            packageDir: packagePath,
+            disableSandbox: disableSandbox
+        )
+        if let name = ManifestParser.packageName(manifest) {
+            ref["name"] = name
+        }
+        return ref
     }
 
     private static func artifactDirectory(
@@ -411,14 +459,16 @@ enum WorkspaceRestorer {
             }
         }
         var result: [BinaryArtifact] = []
-        for entry in try await AsyncFileSystem.contentsOfDirectory(at: directory) {
+        let entries = try await AsyncFileSystem.contentsOfDirectory(at: directory)
+        for entry in entries.sorted(by: { $0.path < $1.path }) {
             guard try await AsyncFileSystem.isDirectoryAndNotSymlink(entry) else { continue }
             if entry.pathExtension == "xcframework" {
                 result.append(BinaryArtifact(path: entry, kind: ["xcframework": [:]]))
             } else if entry.pathExtension == "artifactbundle" {
                 result.append(BinaryArtifact(path: entry, kind: ["artifactsArchive": [:]]))
             } else {
-                try result.append(contentsOf: await binaryArtifacts(in: entry))
+                let nestedArtifacts = try await binaryArtifacts(in: entry)
+                result.append(contentsOf: nestedArtifacts)
             }
         }
         return result
@@ -700,7 +750,11 @@ enum WorkspaceRestorer {
                 var checkoutState: [String: Any] = try ["revision": pin.revision()]
                 if let branch = pin.state.branch { checkoutState["branch"] = branch }
                 if let version = pin.state.version { checkoutState["version"] = version }
-                let ref = try packageRef(pin)
+                let ref = try await packageRef(
+                    pin,
+                    packagePath: packagePathForPin(scratchDir: scratchDir, pin: pin),
+                    disableSandbox: disableSandbox
+                )
                 dependencies.append([
                     "basedOn": NSNull(),
                     "packageRef": ref,
@@ -708,7 +762,7 @@ enum WorkspaceRestorer {
                         "checkoutState": checkoutState,
                         "name": "sourceControlCheckout",
                     ],
-                    "subpath": ref["name"] ?? pin.identity,
+                    "subpath": PinKind.checkoutDirectoryName(pin),
                 ])
             } else if PinKind.isRegistry(pin.kind) {
                 let ref = try packageRef(pin)
@@ -728,8 +782,12 @@ enum WorkspaceRestorer {
             packageDir: packageDir, disableSandbox: disableSandbox
         )
         for dependency in try ManifestParser.fileSystemDependencies(manifest) {
+            let dependencyPath = packagePathForFileSystemDependency(
+                rootPackageDir: packageDir,
+                dependency: dependency
+            )
             let dependencyManifest = try await ManifestLoader.dumpPackage(
-                packageDir: URL(fileURLWithPath: dependency.path),
+                packageDir: dependencyPath,
                 disableSandbox: disableSandbox
             )
             let ref = fileSystemPackageRef(
@@ -781,42 +839,40 @@ enum WorkspaceRestorer {
         resolved: ResolvedPins,
         disableSandbox: Bool
     ) async throws -> [[String: Any]] {
-        var artifacts: [[String: Any]] = []
         let contexts = try await packageContexts(
             packageDir: packageDir,
             scratchDir: scratchDir,
             resolved: resolved,
             disableSandbox: disableSandbox
         )
-        for context in contexts {
-            guard
-                try await AsyncFileSystem.exists(
-                    context.packagePath.appendingPathComponent("Package.swift"))
-            else {
-                continue
-            }
+        let artifactGroups = try await ConcurrentTasks.map(contexts) { context -> [WorkspaceArtifact] in
+            guard try await AsyncFileSystem.exists(
+                context.packagePath.appendingPathComponent("Package.swift")
+            ) else { return [] }
+
             let manifest = try await ManifestLoader.dumpPackage(
                 packageDir: context.packagePath,
                 disableSandbox: disableSandbox
             )
-            for target in try ManifestParser.binaryTargets(manifest) {
-                if let artifact = try await workspaceArtifact(
+            let targetArtifacts = try await ConcurrentTasks.map(
+                try ManifestParser.binaryTargets(manifest)
+            ) { target in
+                try await workspaceArtifact(
                     target,
                     context: context,
                     scratchDir: scratchDir
-                ) {
-                    artifacts.append(artifact)
-                }
+                )
             }
+            return targetArtifacts.compactMap { $0 }
         }
-        return artifacts
+        return artifactGroups.flatMap { $0 }.map(\.value)
     }
 
     private static func workspaceArtifact(
         _ target: ManifestBinaryTarget,
         context: PackageContext,
         scratchDir: URL
-    ) async throws -> [String: Any]? {
+    ) async throws -> WorkspaceArtifact? {
         let identity = context.packageRef["identity"] ?? target.name
         let artifact: BinaryArtifact
         let source: [String: Any]
@@ -866,13 +922,14 @@ enum WorkspaceRestorer {
             }
         }
 
-        return [
-            "kind": artifact.kind,
-            "packageRef": context.packageRef,
-            "path": artifact.path.path,
-            "source": source,
-            "targetName": target.name,
-        ]
+        return WorkspaceArtifact(
+            value: [
+                "kind": artifact.kind,
+                "packageRef": context.packageRef,
+                "path": artifact.path.path,
+                "source": source,
+                "targetName": target.name,
+            ])
     }
 
     private static func jsonPackageIdentity(_ object: [String: Any]) -> String {

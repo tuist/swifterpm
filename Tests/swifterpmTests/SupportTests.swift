@@ -30,6 +30,17 @@ struct SupportTests {
     }
 
     @Test
+    func concurrentTaskMapPreservesInputOrder() async throws {
+        let values = [0, 1, 2, 3]
+        let mapped = try await ConcurrentTasks.map(values, maxConcurrentTasks: 4) { value in
+            try await Task.sleep(nanoseconds: UInt64((values.count - value) * 1_000_000))
+            return value
+        }
+
+        #expect(mapped == values)
+    }
+
+    @Test
     func filesystemHelpersFlattenAndSymlinkDirectory() async throws {
         try await withTemporaryDirectory { root in
             let source = root.appendingPathComponent("source")

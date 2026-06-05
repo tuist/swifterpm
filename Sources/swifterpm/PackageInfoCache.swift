@@ -66,54 +66,47 @@ enum PackageInfoCacheWriter {
             .filter { PinKind.isSourceControl($0.kind) || PinKind.isRegistry($0.kind) }
             .sorted { $0.identity < $1.identity }
 
-        let packages = try await withThrowingTaskGroup(of: PackageInfoEntry.self) { group in
-            for pin in packagePins {
-                group.addTask {
-                    let packagePath = try packagePathForPin(scratchDir: scratchDir, pin: pin)
-                    let packageInfoPath =
-                        cacheDir
-                        .appendingPathComponent("packages")
-                        .appendingPathComponent(
-                            "\(SafeFileName.make(pin.identity))-\(entryHash(pin)).json")
-                    _ = try await cachedOrDumpPackageJSON(
-                        packageDir: packagePath, destination: packageInfoPath,
-                        disableSandbox: disableSandbox)
-                    return packageEntry(
-                        pin: pin, packagePath: packagePath, packageInfoPath: packageInfoPath)
-                }
-            }
-            var entries: [PackageInfoEntry] = []
-            for try await entry in group {
-                entries.append(entry)
-            }
-            return entries.sorted { $0.identity < $1.identity }
-        }
-
-        var allPackages = packages
-        var localDependencies = try ManifestParser.fileSystemDependencies(rootManifest)
-        localDependencies.sort { $0.identity < $1.identity }
-        for dependency in localDependencies {
-            let packagePath = URL(fileURLWithPath: dependency.path)
+        let packages = try await ConcurrentTasks.map(packagePins) { pin in
+            let packagePath = try packagePathForPin(scratchDir: scratchDir, pin: pin)
             let packageInfoPath =
                 cacheDir
                 .appendingPathComponent("packages")
                 .appendingPathComponent(
-                    "\(SafeFileName.make(dependency.identity))-\(String(Hashing.stable(dependency.path).prefix(16))).json"
+                    "\(SafeFileName.make(pin.identity))-\(entryHash(pin)).json")
+            _ = try await cachedOrDumpPackageJSON(
+                packageDir: packagePath, destination: packageInfoPath,
+                disableSandbox: disableSandbox)
+            return packageEntry(
+                pin: pin, packagePath: packagePath, packageInfoPath: packageInfoPath)
+        }.sorted { $0.identity < $1.identity }
+
+        var allPackages = packages
+        var localDependencies = try ManifestParser.fileSystemDependencies(rootManifest)
+        localDependencies.sort { $0.identity < $1.identity }
+        let localPackages = try await ConcurrentTasks.map(localDependencies) { dependency in
+            let packagePath = packagePathForFileSystemDependency(
+                rootPackageDir: packageDir, dependency: dependency)
+            let dependencyHash = String(Hashing.stable(dependency.path).prefix(16))
+            let packageInfoPath =
+                cacheDir
+                .appendingPathComponent("packages")
+                .appendingPathComponent(
+                    "\(SafeFileName.make(dependency.identity))-\(dependencyHash).json"
                 )
             _ = try await cachedOrDumpPackageJSON(
                 packageDir: packagePath, destination: packageInfoPath,
                 disableSandbox: disableSandbox)
-            allPackages.append(
-                PackageInfoEntry(
-                    identity: dependency.identity,
-                    kind: "fileSystem",
-                    location: dependency.path,
-                    version: nil,
-                    revision: nil,
-                    packagePath: packagePath.path,
-                    packageInfoPath: packageInfoPath.path
-                ))
+            return PackageInfoEntry(
+                identity: dependency.identity,
+                kind: "fileSystem",
+                location: dependency.path,
+                version: nil,
+                revision: nil,
+                packagePath: packagePath.path,
+                packageInfoPath: packageInfoPath.path
+            )
         }
+        allPackages.append(contentsOf: localPackages)
 
         let index = PackageInfoIndex(
             schemaVersion: 1,
@@ -152,6 +145,17 @@ enum PackageInfoCacheWriter {
             scratchDir
             .appendingPathComponent("checkouts")
             .appendingPathComponent(PinKind.checkoutDirectoryName(pin))
+    }
+
+    private static func packagePathForFileSystemDependency(
+        rootPackageDir: URL, dependency: ManifestFileSystemDependency
+    ) -> URL {
+        if dependency.path.hasPrefix("/") {
+            return URL(fileURLWithPath: dependency.path)
+        }
+        return rootPackageDir
+            .appendingPathComponent(dependency.path)
+            .standardizedFileURL
     }
 
     private static func cachedOrDumpPackageJSON(

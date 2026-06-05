@@ -11,10 +11,10 @@ struct CLIRunnerTests {
 
             try await CLIRunner.run(
                 CLI(
-                    cachePath: root.appendingPathComponent("cache"),
+                    cachePath: CLIPath(root.appendingPathComponent("cache").path),
                     disableSandbox: true,
                     quiet: true,
-                    command: .resolve(.init(packageDir: root))
+                    command: .resolve(.init(packageDir: CLIPath(root.path)))
                 ))
 
             #expect(try await ResolvedFile.read(packageDir: root).pins == resolved.pins)
@@ -32,10 +32,10 @@ struct CLIRunnerTests {
 
             try await CLIRunner.run(
                 CLI(
-                    cachePath: root.appendingPathComponent("cache"),
+                    cachePath: CLIPath(root.appendingPathComponent("cache").path),
                     disableSandbox: true,
                     quiet: true,
-                    command: .update(.init(packageDir: root))
+                    command: .update(.init(packageDir: CLIPath(root.path)))
                 ))
 
             #expect(
@@ -54,11 +54,11 @@ struct CLIRunnerTests {
 
             try await CLIRunner.run(
                 CLI(
-                    chdir: root,
-                    cachePath: URL(fileURLWithPath: "cache"),
+                    chdir: CLIPath(root.path),
+                    cachePath: CLIPath("cache"),
                     disableSandbox: true,
                     quiet: true,
-                    command: .resolve(.init(packageDir: URL(fileURLWithPath: "Package")))
+                    command: .resolve(.init(packageDir: CLIPath("Package")))
                 ))
 
             #expect(try await AsyncFileSystem.currentDirectoryPath() == currentDirectory)

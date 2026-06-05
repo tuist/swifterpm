@@ -3,14 +3,39 @@ import Foundation
 
 let swifterpmVersion = "0.1.0"
 
+struct CLIPath: Equatable, Sendable {
+    let rawValue: String
+
+    init(_ rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    static func optional(_ path: String?) -> CLIPath? {
+        path.map(CLIPath.init)
+    }
+
+    var path: String {
+        URL(fileURLWithPath: rawValue).path
+    }
+
+    func resolved(relativeTo baseDirectory: URL) -> URL {
+        if rawValue.hasPrefix("/") {
+            return URL(fileURLWithPath: rawValue).standardizedFileURL
+        }
+        return baseDirectory
+            .appendingPathComponent(rawValue)
+            .standardizedFileURL
+    }
+}
+
 struct CLI {
-    var chdir: URL?
-    var packagePath: URL?
-    var cachePath: URL?
-    var scratchPath: URL?
-    var buildPath: URL?
-    var configPath: URL?
-    var securityPath: URL?
+    var chdir: CLIPath?
+    var packagePath: CLIPath?
+    var cachePath: CLIPath?
+    var scratchPath: CLIPath?
+    var buildPath: CLIPath?
+    var configPath: CLIPath?
+    var securityPath: CLIPath?
     var disableSandbox = false
     var enableDependencyCache = false
     var disableDependencyCache = false
@@ -24,7 +49,7 @@ struct CLI {
     var disableSCMToRegistryTransformation = false
     var quiet = false
     var disablePackageInfoCache = false
-    var packageInfoCachePath: URL?
+    var packageInfoCachePath: CLIPath?
     var command: Command
 
     enum Command {
@@ -38,8 +63,8 @@ struct CLI {
         var version: String?
         var branch: String?
         var revision: String?
-        var packageDir = URL(fileURLWithPath: ".")
-        var cacheDir: URL?
+        var packageDir = CLIPath(".")
+        var cacheDir: CLIPath?
         var write = false
         var restore = false
         var printOnly = false
@@ -47,17 +72,17 @@ struct CLI {
 
     struct UpdateOptions {
         var packageNames: [String] = []
-        var packageDir = URL(fileURLWithPath: ".")
-        var cacheDir: URL?
+        var packageDir = CLIPath(".")
+        var cacheDir: CLIPath?
         var write = false
         var restore = false
         var printOnly = false
     }
 
     struct RestoreOptions {
-        var packageDir = URL(fileURLWithPath: ".")
-        var cacheDir: URL?
-        var scratchDir: URL?
+        var packageDir = CLIPath(".")
+        var cacheDir: CLIPath?
+        var scratchDir: CLIPath?
     }
 }
 
@@ -148,28 +173,28 @@ struct SwifterPMCommand: AsyncParsableCommand {
     }
 
     mutating func runAsync() async throws {
-        try await CLIRunner.run(makeCLI())
+        try await CLIRunner.run(try makeCLI())
     }
 
     func makeCLI() throws -> CLI {
         let command: CLI.Command
         switch action {
         case .resolve:
-            command = try .resolve(ResolveArguments.parse(commandArguments).makeOptions())
+            command = .resolve(try ResolveArguments.parse(commandArguments).makeOptions())
         case .update:
-            command = try .update(UpdateArguments.parse(commandArguments).makeOptions())
+            command = .update(try UpdateArguments.parse(commandArguments).makeOptions())
         case .restore:
-            command = try .restore(RestoreArguments.parse(commandArguments).makeOptions())
+            command = .restore(try RestoreArguments.parse(commandArguments).makeOptions())
         }
 
         return CLI(
-            chdir: CLIPath.url(chdir),
-            packagePath: CLIPath.url(packagePath),
-            cachePath: CLIPath.url(cachePath),
-            scratchPath: CLIPath.url(scratchPath),
-            buildPath: CLIPath.url(buildPath),
-            configPath: CLIPath.url(configPath),
-            securityPath: CLIPath.url(securityPath),
+            chdir: CLIPath.optional(chdir),
+            packagePath: CLIPath.optional(packagePath),
+            cachePath: CLIPath.optional(cachePath),
+            scratchPath: CLIPath.optional(scratchPath),
+            buildPath: CLIPath.optional(buildPath),
+            configPath: CLIPath.optional(configPath),
+            securityPath: CLIPath.optional(securityPath),
             disableSandbox: disableSandbox,
             enableDependencyCache: enableDependencyCache,
             disableDependencyCache: disableDependencyCache,
@@ -183,7 +208,7 @@ struct SwifterPMCommand: AsyncParsableCommand {
             disableSCMToRegistryTransformation: disableSCMToRegistryTransformation,
             quiet: quiet,
             disablePackageInfoCache: disablePackageInfoCache,
-            packageInfoCachePath: CLIPath.url(packageInfoCachePath),
+            packageInfoCachePath: CLIPath.optional(packageInfoCachePath),
             command: command
         )
     }
@@ -229,8 +254,8 @@ private struct ResolveArguments: ParsableArguments {
             version: version,
             branch: branch,
             revision: revision,
-            packageDir: CLIPath.url(packageDir),
-            cacheDir: CLIPath.url(cacheDir),
+            packageDir: CLIPath(packageDir),
+            cacheDir: CLIPath.optional(cacheDir),
             write: write,
             restore: restore,
             printOnly: printOnly
@@ -260,8 +285,8 @@ private struct UpdateArguments: ParsableArguments {
     func makeOptions() -> CLI.UpdateOptions {
         CLI.UpdateOptions(
             packageNames: packageNames,
-            packageDir: CLIPath.url(packageDir),
-            cacheDir: CLIPath.url(cacheDir),
+            packageDir: CLIPath(packageDir),
+            cacheDir: CLIPath.optional(cacheDir),
             write: write,
             restore: restore,
             printOnly: printOnly
@@ -281,29 +306,48 @@ private struct RestoreArguments: ParsableArguments {
 
     func makeOptions() -> CLI.RestoreOptions {
         CLI.RestoreOptions(
-            packageDir: CLIPath.url(packageDir),
-            cacheDir: CLIPath.url(cacheDir),
-            scratchDir: CLIPath.url(scratchDir)
+            packageDir: CLIPath(packageDir),
+            cacheDir: CLIPath.optional(cacheDir),
+            scratchDir: CLIPath.optional(scratchDir)
         )
     }
 }
 
-private enum CLIPath {
-    static func url(_ path: String?) -> URL? {
-        path.map(url)
+struct CLIPathResolver {
+    let baseDirectory: URL
+
+    init(chdir: CLIPath?) async throws {
+        let currentDirectory = URL(
+            fileURLWithPath: try await AsyncFileSystem.currentDirectoryPath(),
+            isDirectory: true
+        )
+        guard let chdir else {
+            baseDirectory = currentDirectory.standardizedFileURL
+            return
+        }
+
+        let resolvedChdir = chdir.resolved(relativeTo: currentDirectory)
+        guard try await AsyncFileSystem.isDirectory(resolvedChdir) else {
+            throw ToolError.message("failed to change directory to \(resolvedChdir.path)")
+        }
+        baseDirectory = resolvedChdir.standardizedFileURL
     }
 
-    static func url(_ path: String) -> URL {
-        URL(fileURLWithPath: path)
+    func resolve(_ path: CLIPath?) -> URL? {
+        path.map(resolve)
+    }
+
+    func resolve(_ path: CLIPath) -> URL {
+        path.resolved(relativeTo: baseDirectory)
     }
 }
 
 enum CLIRunner {
     static func run(_ cli: CLI) async throws {
-        let baseDir = try await baseDirectory(cli)
+        let paths = try await CLIPathResolver(chdir: cli.chdir)
 
         switch cli.command {
-        case let .resolve(options):
+        case .resolve(let options):
             try ensureWholePackageResolution(
                 packageName: options.packageName,
                 version: options.version,
@@ -312,7 +356,7 @@ enum CLIRunner {
             )
             try await runResolutionCommand(
                 cli: cli,
-                baseDir: baseDir,
+                paths: paths,
                 packageDir: options.packageDir,
                 cacheDir: options.cacheDir,
                 preferResolvedFile: true,
@@ -320,13 +364,13 @@ enum CLIRunner {
                 restore: options.restore,
                 printOnly: options.printOnly
             )
-        case let .update(options):
+        case .update(let options):
             if !options.packageNames.isEmpty {
                 throw ToolError.message("package-specific update is not supported yet")
             }
             try await runResolutionCommand(
                 cli: cli,
-                baseDir: baseDir,
+                paths: paths,
                 packageDir: options.packageDir,
                 cacheDir: options.cacheDir,
                 preferResolvedFile: false,
@@ -334,64 +378,57 @@ enum CLIRunner {
                 restore: options.restore,
                 printOnly: options.printOnly
             )
-        case let .restore(options):
+        case .restore(let options):
             let cache = try await Cache(
-                root: resolvePath(cliCacheDir(cli: cli, commandCacheDir: options.cacheDir), relativeTo: baseDir))
-            let package = try await canonicalPackageDir(
-                commandPackageDir(cli: cli, commandPackageDir: options.packageDir),
-                relativeTo: baseDir
-            )
+                root: cliCacheDir(cli: cli, paths: paths, commandCacheDir: options.cacheDir))
+            let package = canonicalPackageDir(
+                commandPackageDir(
+                    cli: cli, paths: paths, commandPackageDir: options.packageDir))
             let scratch = commandScratchDir(
-                cli: cli, baseDir: baseDir, packageDir: package,
-                commandScratchDir: options.scratchDir
-            )
-            let registryConfig = try await cliRegistryConfig(cli: cli, baseDir: baseDir, package: package)
+                cli: cli, paths: paths, packageDir: package, commandScratchDir: options.scratchDir)
+            let registryConfig = try await cliRegistryConfig(
+                cli: cli, paths: paths, package: package)
             let resolved = try await ResolvedFile.read(packageDir: package)
             try await WorkspaceRestorer.restorePackage(
                 scratchDir: scratch, packageDir: package, cache: cache, registryConfig: registryConfig,
                 resolved: resolved,
                 quiet: cli.quiet,
-                disableSandbox: cli.disableSandbox
-            )
+                disableSandbox: cli.disableSandbox)
             try await maybeWritePackageInfoCache(
-                cli: cli, baseDir: baseDir, package: package, scratch: scratch, resolved: resolved
-            )
+                cli: cli, paths: paths, package: package, scratch: scratch, resolved: resolved)
             try await WorkspaceRestorer.writeWorkspaceState(
                 packageDir: package, scratchDir: scratch, resolved: resolved,
-                disableSandbox: cli.disableSandbox
-            )
+                disableSandbox: cli.disableSandbox)
         }
     }
 
     private static func runResolutionCommand(
         cli: CLI,
-        baseDir: URL,
-        packageDir: URL,
-        cacheDir: URL?,
+        paths: CLIPathResolver,
+        packageDir: CLIPath,
+        cacheDir: CLIPath?,
         preferResolvedFile: Bool,
         write: Bool,
         restore: Bool,
         printOnly: Bool
     ) async throws {
         let cache = try await Cache(
-            root: resolvePath(cliCacheDir(cli: cli, commandCacheDir: cacheDir), relativeTo: baseDir))
-        let package = try await canonicalPackageDir(
-            commandPackageDir(cli: cli, commandPackageDir: packageDir),
-            relativeTo: baseDir
-        )
+            root: cliCacheDir(cli: cli, paths: paths, commandCacheDir: cacheDir))
+        let package = canonicalPackageDir(
+            commandPackageDir(cli: cli, paths: paths, commandPackageDir: packageDir))
         let scratch = commandScratchDir(
-            cli: cli, baseDir: baseDir, packageDir: package, commandScratchDir: nil
-        )
-        let registryConfig = try await cliRegistryConfig(cli: cli, baseDir: baseDir, package: package)
+            cli: cli, paths: paths, packageDir: package, commandScratchDir: nil)
+        let registryConfig = try await cliRegistryConfig(
+            cli: cli, paths: paths, package: package)
         let readOnly =
             cli.forceResolvedVersions || cli.disableAutomaticResolution
-                || cli.onlyUseVersionsFromResolvedFile
+            || cli.onlyUseVersionsFromResolvedFile
 
         let resolved: ResolvedPins
         let hasResolvedFile =
             cli.skipUpdate
-                ? try await AsyncFileSystem.exists(package.appendingPathComponent("Package.resolved"))
-                : false
+            ? try await AsyncFileSystem.exists(package.appendingPathComponent("Package.resolved"))
+            : false
         if readOnly || hasResolvedFile {
             resolved = try await ResolvedFile.read(packageDir: package)
         } else if preferResolvedFile,
@@ -403,8 +440,7 @@ enum CLIRunner {
             let fresh = try await PackageResolver.resolve(
                 packageDir: package, cache: cache, registryConfig: registryConfig,
                 disableSandbox: cli.disableSandbox,
-                progress: progress
-            )
+                progress: progress)
             if shouldWrite(write: write, printOnly: printOnly) {
                 try await ResolvedFile.write(packageDir: package, resolved: fresh)
             }
@@ -419,20 +455,17 @@ enum CLIRunner {
                 scratchDir: scratch, packageDir: package, cache: cache, registryConfig: registryConfig,
                 resolved: resolved,
                 quiet: cli.quiet,
-                disableSandbox: cli.disableSandbox
-            )
+                disableSandbox: cli.disableSandbox)
             try await maybeWritePackageInfoCache(
-                cli: cli, baseDir: baseDir, package: package, scratch: scratch, resolved: resolved
-            )
+                cli: cli, paths: paths, package: package, scratch: scratch, resolved: resolved)
             try await WorkspaceRestorer.writeWorkspaceState(
                 packageDir: package, scratchDir: scratch, resolved: resolved,
-                disableSandbox: cli.disableSandbox
-            )
+                disableSandbox: cli.disableSandbox)
         }
     }
 
     private static func maybeWritePackageInfoCache(
-        cli: CLI, baseDir: URL, package: URL, scratch: URL, resolved: ResolvedPins
+        cli: CLI, paths: CLIPathResolver, package: URL, scratch: URL, resolved: ResolvedPins
     ) async throws {
         if cli.disablePackageInfoCache {
             return
@@ -441,7 +474,7 @@ enum CLIRunner {
             packageDir: package,
             scratchDir: scratch,
             resolved: resolved,
-            cacheDir: resolvePath(cli.packageInfoCachePath, relativeTo: baseDir),
+            cacheDir: paths.resolve(cli.packageInfoCachePath),
             disableSandbox: cli.disableSandbox,
             quiet: cli.quiet
         )
@@ -463,71 +496,41 @@ enum CLIRunner {
         !printOnly || restore
     }
 
-    private static func cliCacheDir(cli: CLI, commandCacheDir: URL?) -> URL? {
-        commandCacheDir ?? cli.cachePath
+    private static func cliCacheDir(cli: CLI, paths: CLIPathResolver, commandCacheDir: CLIPath?)
+        -> URL?
+    {
+        paths.resolve(commandCacheDir ?? cli.cachePath)
     }
 
-    private static func cliRegistryConfig(cli: CLI, baseDir: URL, package: URL) async throws -> RegistryConfig {
+    private static func cliRegistryConfig(
+        cli: CLI, paths: CLIPathResolver, package: URL
+    ) async throws
+        -> RegistryConfig
+    {
         try await RegistryConfig.load(
-            packageDir: package,
-            configPath: resolvePath(cli.configPath, relativeTo: baseDir),
-            defaultRegistryURL: cli.defaultRegistryURL
-        )
+            packageDir: package, configPath: paths.resolve(cli.configPath),
+            defaultRegistryURL: cli.defaultRegistryURL)
     }
 
-    private static func commandPackageDir(cli: CLI, commandPackageDir: URL) -> URL {
-        cli.packagePath ?? commandPackageDir
+    private static func commandPackageDir(
+        cli: CLI, paths: CLIPathResolver, commandPackageDir: CLIPath
+    )
+        -> URL
+    {
+        paths.resolve(cli.packagePath ?? commandPackageDir)
     }
 
     private static func commandScratchDir(
-        cli: CLI,
-        baseDir: URL,
-        packageDir: URL,
-        commandScratchDir: URL?
-    ) -> URL {
-        if let scratch = commandScratchDir ?? cli.scratchPath ?? cli.buildPath {
-            return resolvePath(scratch, relativeTo: baseDir)
+        cli: CLI, paths: CLIPathResolver, packageDir: URL, commandScratchDir: CLIPath?
+    ) -> URL
+    {
+        if let scratchDir = commandScratchDir ?? cli.scratchPath ?? cli.buildPath {
+            return paths.resolve(scratchDir)
         }
         return packageDir.appendingPathComponent(".build")
     }
 
-    private static func baseDirectory(_ cli: CLI) async throws -> URL {
-        if let chdir = cli.chdir {
-            return try await canonicalPackageDir(chdir, relativeTo: nil)
-        }
-        return URL(fileURLWithPath: try await AsyncFileSystem.currentDirectoryPath())
-    }
-
-    private static func canonicalPackageDir(_ packageDir: URL, relativeTo baseDir: URL?) async throws -> URL {
-        if !isRelativeFilePath(packageDir), packageDir.path.hasPrefix("/") {
-            return PathCanonicalizer.realpath(packageDir)
-        }
-        let base: URL
-        if let baseDir {
-            base = baseDir
-        } else {
-            base = URL(fileURLWithPath: try await AsyncFileSystem.currentDirectoryPath())
-        }
-        let absolute = base.appendingPathComponent(pathComponent(packageDir)).standardizedFileURL
-        return PathCanonicalizer.realpath(absolute)
-    }
-
-    private static func resolvePath(_ path: URL?, relativeTo baseDir: URL) -> URL? {
-        path.map { resolvePath($0, relativeTo: baseDir) }
-    }
-
-    private static func resolvePath(_ path: URL, relativeTo baseDir: URL) -> URL {
-        if !isRelativeFilePath(path), path.path.hasPrefix("/") {
-            return path.standardizedFileURL
-        }
-        return baseDir.appendingPathComponent(pathComponent(path)).standardizedFileURL
-    }
-
-    private static func isRelativeFilePath(_ path: URL) -> Bool {
-        path.baseURL != nil && !path.relativePath.hasPrefix("/")
-    }
-
-    private static func pathComponent(_ path: URL) -> String {
-        isRelativeFilePath(path) ? path.relativePath : path.path
+    private static func canonicalPackageDir(_ packageDir: URL) -> URL {
+        packageDir.standardizedFileURL
     }
 }
