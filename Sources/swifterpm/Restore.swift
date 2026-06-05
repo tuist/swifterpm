@@ -312,10 +312,15 @@ enum WorkspaceRestorer {
             guard PinKind.isSourceControl(pin.kind) || PinKind.isRegistry(pin.kind) else {
                 continue
             }
+            let packagePath = try packagePathForPin(scratchDir: scratchDir, pin: pin)
             contexts.append(
                 PackageContext(
-                    packageRef: try packageRef(pin),
-                    packagePath: try packagePathForPin(scratchDir: scratchDir, pin: pin),
+                    packageRef: try await packageRef(
+                        pin,
+                        packagePath: packagePath,
+                        disableSandbox: disableSandbox
+                    ),
+                    packagePath: packagePath,
                     canonicalizeLocalBinaryPaths: false
                 ))
         }
@@ -374,6 +379,30 @@ enum WorkspaceRestorer {
             "location": pin.location,
             "name": PinKind.checkoutDirectoryName(pin),
         ]
+    }
+
+    private static func packageRef(
+        _ pin: ResolvedPin,
+        packagePath: URL,
+        disableSandbox: Bool
+    ) async throws -> [String: String] {
+        var ref = try packageRef(pin)
+        guard PinKind.isSourceControl(pin.kind) else {
+            return ref
+        }
+        let manifestPath = packagePath.appendingPathComponent("Package.swift")
+        guard try await AsyncFileSystem.exists(manifestPath) else {
+            return ref
+        }
+
+        let manifest = try await ManifestLoader.dumpPackage(
+            packageDir: packagePath,
+            disableSandbox: disableSandbox
+        )
+        if let name = ManifestParser.packageName(manifest) {
+            ref["name"] = name
+        }
+        return ref
     }
 
     private static func artifactDirectory(
@@ -721,7 +750,11 @@ enum WorkspaceRestorer {
                 var checkoutState: [String: Any] = try ["revision": pin.revision()]
                 if let branch = pin.state.branch { checkoutState["branch"] = branch }
                 if let version = pin.state.version { checkoutState["version"] = version }
-                let ref = try packageRef(pin)
+                let ref = try await packageRef(
+                    pin,
+                    packagePath: packagePathForPin(scratchDir: scratchDir, pin: pin),
+                    disableSandbox: disableSandbox
+                )
                 dependencies.append([
                     "basedOn": NSNull(),
                     "packageRef": ref,
@@ -729,7 +762,7 @@ enum WorkspaceRestorer {
                         "checkoutState": checkoutState,
                         "name": "sourceControlCheckout",
                     ],
-                    "subpath": ref["name"] ?? pin.identity,
+                    "subpath": PinKind.checkoutDirectoryName(pin),
                 ])
             } else if PinKind.isRegistry(pin.kind) {
                 let ref = try packageRef(pin)

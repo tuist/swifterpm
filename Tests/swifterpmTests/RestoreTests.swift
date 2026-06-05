@@ -73,6 +73,57 @@ struct RestoreTests {
     }
 
     @Test
+    func writeWorkspaceStateUsesSourceControlManifestNameAndCheckoutSubpath() async throws {
+        try await withTemporaryDirectory { root in
+            let package = root.appendingPathComponent("Package")
+            let scratch = root.appendingPathComponent("scratch")
+            let checkout = scratch.appendingPathComponent("checkouts/deck-of-playing-cards")
+            try await writeCachedManifest(emptyManifest(), packageDir: package)
+            try await writeCachedManifest(
+                emptyManifest(name: "DeckOfPlayingCards"),
+                packageDir: checkout
+            )
+
+            let resolved = ResolvedPins(
+                originHash: "origin",
+                pins: [
+                    ResolvedPin(
+                        identity: "deck-of-playing-cards",
+                        kind: "localSourceControl",
+                        location: root.appendingPathComponent("deck-of-playing-cards").path,
+                        state: ResolvedState(
+                            branch: nil,
+                            revision: "abcdef1234567890",
+                            version: "1.0.0"
+                        )
+                    ),
+                ],
+                version: 3
+            )
+
+            try await WorkspaceRestorer.writeWorkspaceState(
+                packageDir: package,
+                scratchDir: scratch,
+                resolved: resolved,
+                disableSandbox: false
+            )
+
+            let statePath = scratch.appendingPathComponent("workspace-state.json")
+            let state = try #require(
+                try JSONSerialization.jsonObject(
+                    with: await AsyncFileSystem.readData(from: statePath))
+                    as? [String: Any])
+            let object = try #require(state["object"] as? [String: Any])
+            let dependencies = try #require(object["dependencies"] as? [[String: Any]])
+            let dependency = try #require(dependencies.first)
+            let packageRef = try #require(dependency["packageRef"] as? [String: Any])
+
+            #expect(packageRef["name"] as? String == "DeckOfPlayingCards")
+            #expect(dependency["subpath"] as? String == "deck-of-playing-cards")
+        }
+    }
+
+    @Test
     func writeWorkspaceStateWritesRootLocalBinaryArtifacts() async throws {
         try await withTemporaryDirectory { root in
             let package = root.appendingPathComponent("Package")
