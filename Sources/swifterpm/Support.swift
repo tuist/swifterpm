@@ -61,19 +61,19 @@ enum SystemProcess {
             arguments: Arguments(arguments),
             environment: subprocessEnvironment(environment),
             workingDirectory: workingDirectory.map { FilePath($0.path) },
-            output: .data(limit: outputLimit),
-            error: .data(limit: outputLimit)
+            output: .bytes(limit: outputLimit),
+            error: .bytes(limit: outputLimit)
         )
 
         guard result.terminationStatus.isSuccess else {
-            let stderrText = String(data: result.standardError, encoding: .utf8) ?? ""
-            let stdoutText = String(data: result.standardOutput, encoding: .utf8) ?? ""
+            let stderrText = String(data: Data(result.standardError), encoding: .utf8) ?? ""
+            let stdoutText = String(data: Data(result.standardOutput), encoding: .utf8) ?? ""
             let message = stderrText.isEmpty ? stdoutText : stderrText
             throw ToolError.message(
                 message.isEmpty ? result.terminationStatus.description : message)
         }
 
-        return Result(stdout: result.standardOutput, stderr: result.standardError)
+        return Result(stdout: Data(result.standardOutput), stderr: Data(result.standardError))
     }
 
     static func output(
