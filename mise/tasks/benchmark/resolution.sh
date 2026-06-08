@@ -162,10 +162,15 @@ benchmark_prepared_codebase() {
 
   local swiftpm_scratch="${swiftpm_package_dir}/.build"
   local swifterpm_scratch="${swifterpm_package_dir}/.build"
+  local swiftpm_cold_cache="${codebase_root}/swiftpm-cold-cache"
+  local swiftpm_warm_cache="${codebase_root}/swiftpm-warm-cache"
+  local swiftpm_config="${codebase_root}/swiftpm-config"
+  local swiftpm_security="${codebase_root}/swiftpm-security"
   local swifterpm_cold_cache="${codebase_root}/swifterpm-cold-cache"
   local swifterpm_warm_cache="${codebase_root}/swifterpm-warm-cache"
 
-  local swift_command="swift package --package-path $(quote "${swiftpm_package_dir}") --scratch-path $(quote "${swiftpm_scratch}") resolve"
+  local swiftpm_cold_command="swift package --package-path $(quote "${swiftpm_package_dir}") --scratch-path $(quote "${swiftpm_scratch}") --cache-path $(quote "${swiftpm_cold_cache}") --config-path $(quote "${swiftpm_config}") --security-path $(quote "${swiftpm_security}") resolve"
+  local swiftpm_warm_command="swift package --package-path $(quote "${swiftpm_package_dir}") --scratch-path $(quote "${swiftpm_scratch}") --cache-path $(quote "${swiftpm_warm_cache}") --config-path $(quote "${swiftpm_config}") --security-path $(quote "${swiftpm_security}") resolve"
   local swifterpm_cold_command="$(quote "${swifterpm_bin}") --package-path $(quote "${swifterpm_package_dir}") --scratch-path $(quote "${swifterpm_scratch}") --cache-path $(quote "${swifterpm_cold_cache}") --force-resolved-versions --disable-package-info-cache --quiet resolve"
   local swifterpm_warm_command="$(quote "${swifterpm_bin}") --package-path $(quote "${swifterpm_package_dir}") --scratch-path $(quote "${swifterpm_scratch}") --cache-path $(quote "${swifterpm_warm_cache}") --force-resolved-versions --disable-package-info-cache --quiet resolve"
 
@@ -173,15 +178,21 @@ benchmark_prepared_codebase() {
   run_hyperfine \
     "${name}" \
     "cold" \
-    "rm -rf $(quote "${swiftpm_scratch}") $(quote "${swifterpm_scratch}") $(quote "${swifterpm_cold_cache}")" \
-    "${swift_command}" \
+    "rm -rf $(quote "${swiftpm_scratch}") $(quote "${swifterpm_scratch}") $(quote "${swiftpm_cold_cache}") $(quote "${swifterpm_cold_cache}")" \
+    "${swiftpm_cold_command}" \
     "${swifterpm_cold_command}" \
     "${output_dir}/${slug}-cold.md" \
     "${output_dir}/${slug}-cold.json"
 
   echo "Priming warm caches for ${name}"
-  rm -rf "${swiftpm_scratch}" "${swifterpm_scratch}" "${swifterpm_warm_cache}"
-  swift package --package-path "${swiftpm_package_dir}" --scratch-path "${swiftpm_scratch}" resolve >/dev/null 2>&1
+  rm -rf "${swiftpm_scratch}" "${swifterpm_scratch}" "${swiftpm_warm_cache}" "${swifterpm_warm_cache}"
+  swift package \
+    --package-path "${swiftpm_package_dir}" \
+    --scratch-path "${swiftpm_scratch}" \
+    --cache-path "${swiftpm_warm_cache}" \
+    --config-path "${swiftpm_config}" \
+    --security-path "${swiftpm_security}" \
+    resolve >/dev/null 2>&1
   rm -rf "${swiftpm_scratch}"
   "${swifterpm_bin}" \
     --package-path "${swifterpm_package_dir}" \
@@ -198,7 +209,7 @@ benchmark_prepared_codebase() {
     "${name}" \
     "worktree-warm" \
     "rm -rf $(quote "${swiftpm_scratch}") $(quote "${swifterpm_scratch}")" \
-    "${swift_command}" \
+    "${swiftpm_warm_command}" \
     "${swifterpm_warm_command}" \
     "${output_dir}/${slug}-warm.md" \
     "${output_dir}/${slug}-warm.json"
@@ -243,8 +254,8 @@ trap 'rm -rf "${work_root}"' EXIT
   echo
   echo "Generated with \`mise run benchmark:resolution -- --runs ${runs}\`."
   echo
-  echo "Cold resolution removes package-local scratch directories and swifterpm's global cache before each measured run."
-  echo "Worktree-warm resolution removes package-local scratch directories before each measured run, but keeps already-primed global caches to model switching to another clean worktree."
+  echo "Cold resolution removes package-local scratch directories and each tool's isolated global cache before each measured run."
+  echo "Worktree-warm resolution removes package-local scratch directories before each measured run, but keeps each tool's already-primed isolated global cache to model switching to another clean worktree."
   echo
 } > "${combined_report}"
 

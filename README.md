@@ -117,9 +117,9 @@ Latest three-run sample, generated on macOS 26.4.1 with Apple Swift 6.3.2:
 
 | Codebase | Scenario | SwiftPM | swifterpm | Time reduction | Speedup |
 |:---|:---|---:|---:|---:|---:|
-| Pocket Casts iOS `Modules/Package.swift` | Cold | 67.346 s | 113.366 s | -68.34% | 0.59x |
-| Pocket Casts iOS `Modules/Package.swift` | Worktree-warm | 65.622 s | 0.680 s | 98.96% | 96.55x |
-| Firefox iOS root `Package.swift` | Cold | 14.219 s | 12.091 s | 14.96% | 1.18x |
-| Firefox iOS root `Package.swift` | Worktree-warm | 4.146 s | 0.441 s | 89.36% | 9.40x |
+| Pocket Casts iOS `Modules/Package.swift` | Cold | 245.888 s | 140.161 s | 43.00% | 1.75x |
+| Pocket Casts iOS `Modules/Package.swift` | Worktree-warm | 126.283 s | 0.700 s | 99.45% | 180.40x |
+| Firefox iOS root `Package.swift` | Cold | 51.068 s | 14.713 s | 71.19% | 3.47x |
+| Firefox iOS root `Package.swift` | Worktree-warm | 15.540 s | 0.482 s | 96.90% | 32.27x |
 
-Cold resolution removes package-local scratch directories and `swifterpm`'s cache before each run. Worktree-warm resolution removes package-local scratch directories before each run while keeping already-primed global caches, which models switching to another clean worktree.
+Cold resolution removes package-local scratch directories and each tool's isolated global cache before each run. Worktree-warm resolution removes package-local scratch directories before each run while keeping each tool's already-primed isolated global cache, which models switching to another clean worktree.
