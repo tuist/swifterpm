@@ -17,9 +17,11 @@ import Subprocess
     import FoundationNetworking
 #endif
 
-#if os(Linux)
+#if canImport(Glibc)
     import Glibc
-#else
+#elseif canImport(Musl)
+    import Musl
+#elseif canImport(Darwin)
     import Darwin
 #endif
 
@@ -337,8 +339,10 @@ enum PathCanonicalizer {
             url.standardizedFileURL
         #else
             var buffer = [CChar](repeating: 0, count: Int(PATH_MAX))
-            #if os(Linux)
+            #if canImport(Glibc)
                 let resolved = Glibc.realpath(url.path, &buffer)
+            #elseif canImport(Musl)
+                let resolved = Musl.realpath(url.path, &buffer)
             #else
                 let resolved = Darwin.realpath(url.path, &buffer)
             #endif
