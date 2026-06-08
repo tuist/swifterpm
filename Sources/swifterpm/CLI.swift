@@ -1,7 +1,7 @@
 import ArgumentParser
 import Foundation
 
-public let swifterpmVersion = "0.6.1"
+public let swifterpmVersion = "0.7.0"
 
 struct CLIPath: Equatable, Sendable {
     let rawValue: String
@@ -90,6 +90,107 @@ enum CLIAction: String, ExpressibleByArgument {
     case resolve
     case update
     case restore
+}
+
+public enum SwifterPMParsedCommand: Sendable {
+    case resolve(SwifterPMResolutionRequest)
+    case update(SwifterPMResolutionRequest)
+    case restore(SwifterPMRestoreRequest)
+}
+
+public enum SwifterPMCommandParser {
+    public static func parse(_ args: [String]) async throws -> SwifterPMParsedCommand {
+        let cli = try CLIParser.parse(args)
+        let paths = try await CLIPathResolver(chdir: cli.chdir)
+
+        switch cli.command {
+        case .resolve(let options):
+            try CLIRunner.ensureWholePackageResolution(
+                packageName: options.packageName,
+                version: options.version,
+                branch: options.branch,
+                revision: options.revision
+            )
+            return .resolve(
+                try resolutionRequest(
+                    cli: cli,
+                    paths: paths,
+                    packageDir: options.packageDir,
+                    cacheDir: options.cacheDir,
+                    write: options.write,
+                    restore: options.restore,
+                    printOnly: options.printOnly
+                )
+            )
+        case .update(let options):
+            if !options.packageNames.isEmpty {
+                throw ToolError.message("package-specific update is not supported yet")
+            }
+            return .update(
+                try resolutionRequest(
+                    cli: cli,
+                    paths: paths,
+                    packageDir: options.packageDir,
+                    cacheDir: options.cacheDir,
+                    write: options.write,
+                    restore: options.restore,
+                    printOnly: options.printOnly
+                )
+            )
+        case .restore(let options):
+            let package = CLIRunner.canonicalPackageDir(
+                CLIRunner.commandPackageDir(
+                    cli: cli, paths: paths, commandPackageDir: options.packageDir)
+            )
+            return .restore(
+                SwifterPMRestoreRequest(
+                    packageDirectory: package,
+                    cacheDirectory: CLIRunner.cliCacheDir(
+                        cli: cli, paths: paths, commandCacheDir: options.cacheDir),
+                    scratchDirectory: CLIRunner.commandScratchDir(
+                        cli: cli, paths: paths, packageDir: package, commandScratchDir: options.scratchDir),
+                    registryConfigurationPath: paths.resolve(cli.configPath),
+                    defaultRegistryURL: cli.defaultRegistryURL,
+                    disableSandbox: cli.disableSandbox,
+                    disablePackageInfoCache: cli.disablePackageInfoCache,
+                    packageInfoCacheDirectory: paths.resolve(cli.packageInfoCachePath),
+                    quiet: cli.quiet
+                )
+            )
+        }
+    }
+
+    private static func resolutionRequest(
+        cli: CLI,
+        paths: CLIPathResolver,
+        packageDir: CLIPath,
+        cacheDir: CLIPath?,
+        write: Bool,
+        restore: Bool,
+        printOnly: Bool
+    ) throws -> SwifterPMResolutionRequest {
+        let package = CLIRunner.canonicalPackageDir(
+            CLIRunner.commandPackageDir(cli: cli, paths: paths, commandPackageDir: packageDir)
+        )
+        return SwifterPMResolutionRequest(
+            packageDirectory: package,
+            cacheDirectory: CLIRunner.cliCacheDir(cli: cli, paths: paths, commandCacheDir: cacheDir),
+            scratchDirectory: CLIRunner.commandScratchDir(
+                cli: cli, paths: paths, packageDir: package, commandScratchDir: nil),
+            registryConfigurationPath: paths.resolve(cli.configPath),
+            defaultRegistryURL: cli.defaultRegistryURL,
+            disableSandbox: cli.disableSandbox,
+            forceResolvedVersions: cli.forceResolvedVersions || cli.disableAutomaticResolution
+                || cli.onlyUseVersionsFromResolvedFile,
+            skipUpdate: cli.skipUpdate,
+            writeResolvedFile: CLIRunner.shouldWrite(write: write, printOnly: printOnly),
+            restorePackage: CLIRunner.shouldRestore(restore: restore, printOnly: printOnly),
+            disablePackageInfoCache: cli.disablePackageInfoCache,
+            packageInfoCacheDirectory: paths.resolve(cli.packageInfoCachePath),
+            scmToRegistryTransformation: try CLIRunner.scmToRegistryTransformation(cli),
+            quiet: cli.quiet
+        )
+    }
 }
 
 public struct SwifterPMCommand: AsyncParsableCommand {
@@ -483,7 +584,7 @@ enum CLIRunner {
         )
     }
 
-    private static func scmToRegistryTransformation(_ cli: CLI) throws
+    static func scmToRegistryTransformation(_ cli: CLI) throws
         -> SCMToRegistryTransformation
     {
         let enabled = [
@@ -503,7 +604,7 @@ enum CLIRunner {
         return .disabled
     }
 
-    private static func ensureWholePackageResolution(
+    static func ensureWholePackageResolution(
         packageName: String?, version: String?, branch: String?, revision: String?
     ) throws {
         if packageName != nil || version != nil || branch != nil || revision != nil {
@@ -511,15 +612,15 @@ enum CLIRunner {
         }
     }
 
-    private static func shouldWrite(write: Bool, printOnly: Bool) -> Bool {
+    static func shouldWrite(write: Bool, printOnly: Bool) -> Bool {
         !printOnly || write
     }
 
-    private static func shouldRestore(restore: Bool, printOnly: Bool) -> Bool {
+    static func shouldRestore(restore: Bool, printOnly: Bool) -> Bool {
         !printOnly || restore
     }
 
-    private static func cliCacheDir(cli: CLI, paths: CLIPathResolver, commandCacheDir: CLIPath?)
+    static func cliCacheDir(cli: CLI, paths: CLIPathResolver, commandCacheDir: CLIPath?)
         -> URL?
     {
         paths.resolve(commandCacheDir ?? cli.cachePath)
@@ -535,7 +636,7 @@ enum CLIRunner {
             defaultRegistryURL: cli.defaultRegistryURL)
     }
 
-    private static func commandPackageDir(
+    static func commandPackageDir(
         cli: CLI, paths: CLIPathResolver, commandPackageDir: CLIPath
     )
         -> URL
@@ -543,7 +644,7 @@ enum CLIRunner {
         paths.resolve(cli.packagePath ?? commandPackageDir)
     }
 
-    private static func commandScratchDir(
+    static func commandScratchDir(
         cli: CLI, paths: CLIPathResolver, packageDir: URL, commandScratchDir: CLIPath?
     ) -> URL
     {
@@ -553,7 +654,7 @@ enum CLIRunner {
         return packageDir.appendingPathComponent(".build")
     }
 
-    private static func canonicalPackageDir(_ packageDir: URL) -> URL {
+    static func canonicalPackageDir(_ packageDir: URL) -> URL {
         packageDir.standardizedFileURL
     }
 }

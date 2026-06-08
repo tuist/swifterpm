@@ -50,8 +50,8 @@ swift_binary(
 
 apple_bundle_version(
     name = "swifterpm_version",
-    build_version = "0.6.1",
-    short_version_string = "0.6.1",
+    build_version = "0.7.0",
+    short_version_string = "0.7.0",
 )
 
 macos_command_line_application(

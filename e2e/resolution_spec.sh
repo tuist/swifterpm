@@ -523,7 +523,7 @@ bazel_dep(
     version = "3.6.1",
     repo_name = "build_bazel_rules_swift",
 )
-bazel_dep(name = "swifterpm", version = "0.6.1")
+bazel_dep(name = "swifterpm", version = "0.7.0")
 
 local_path_override(
     module_name = "swifterpm",
