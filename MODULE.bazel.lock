@@ -655,7 +655,7 @@
     "@@rules_swift_package_manager+//:extensions.bzl%swift_deps": {
       "general": {
         "bzlTransitiveDigest": "gKtWD1CS4Sqn+lQH91Cimr4D3cJN0MkrzkFJPkoIVMU=",
-        "usagesDigest": "nxFwIL5ndtk9rEjZgpai7EJO+3viqYP4Ak37frp72e0=",
+        "usagesDigest": "7VtBlef3ftG6H1Dk3qysN3ceZjUWIGzJmUi3l3LrCpQ=",
         "recordedFileInputs": {
           "@@//third_party/nio/Package.resolved": "6cf15c3b15b6b5e8b72183ed89873a205ced4cabb392cebbaa30d3d7772e7c8b"
         },

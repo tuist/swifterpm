@@ -124,4 +124,109 @@ struct CLITests {
             try CLIParser.parse(["resolve", "--unknown-option"])
         }
     }
+
+    @Test
+    func publicCommandParserBuildsResolutionRequestFromResolveArguments() async throws {
+        try await withTemporaryDirectory { root in
+            let package = root.appendingPathComponent("Package")
+            let cache = root.appendingPathComponent("Cache")
+            let scratch = root.appendingPathComponent("Scratch")
+            let config = root.appendingPathComponent("registries.json")
+            let packageInfoCache = root.appendingPathComponent("PackageInfo")
+
+            let command = try await SwifterPMCommandParser.parse([
+                "--package-path", package.path,
+                "--cache-path", cache.path,
+                "--scratch-path", scratch.path,
+                "--config-path", config.path,
+                "--default-registry-url", "https://registry.example.com",
+                "--disable-sandbox",
+                "--force-resolved-versions",
+                "--skip-update",
+                "--replace-scm-with-registry",
+                "--package-info-cache-path", packageInfoCache.path,
+                "--quiet",
+                "resolve",
+            ])
+
+            guard case .resolve(let request) = command else {
+                Issue.record("expected resolve command")
+                return
+            }
+            #expect(request.packageDirectory == package.standardizedFileURL)
+            #expect(request.cacheDirectory == cache.standardizedFileURL)
+            #expect(request.scratchDirectory == scratch.standardizedFileURL)
+            #expect(request.registryConfigurationPath == config.standardizedFileURL)
+            #expect(request.defaultRegistryURL == "https://registry.example.com")
+            #expect(request.disableSandbox)
+            #expect(request.forceResolvedVersions)
+            #expect(request.skipUpdate)
+            #expect(request.writeResolvedFile)
+            #expect(request.restorePackage)
+            #expect(request.disablePackageInfoCache == false)
+            #expect(request.packageInfoCacheDirectory == packageInfoCache.standardizedFileURL)
+            #expect(request.scmToRegistryTransformation == .replaceSCMWithRegistry)
+            #expect(request.quiet)
+        }
+    }
+
+    @Test
+    func publicCommandParserBuildsUpdateRequestFromUpdateArguments() async throws {
+        try await withTemporaryDirectory { root in
+            let package = root.appendingPathComponent("Package")
+            let build = root.appendingPathComponent("Build")
+
+            let command = try await SwifterPMCommandParser.parse([
+                "--package-path", package.path,
+                "--build-path", build.path,
+                "--disable-automatic-resolution",
+                "--use-registry-identity-for-scm",
+                "update",
+            ])
+
+            guard case .update(let request) = command else {
+                Issue.record("expected update command")
+                return
+            }
+            #expect(request.packageDirectory == package.standardizedFileURL)
+            #expect(request.scratchDirectory == build.standardizedFileURL)
+            #expect(request.forceResolvedVersions)
+            #expect(request.scmToRegistryTransformation == .useRegistryIdentityForSCM)
+        }
+    }
+
+    @Test
+    func publicCommandParserBuildsRestoreRequestFromRestoreArguments() async throws {
+        try await withTemporaryDirectory { root in
+            let package = root.appendingPathComponent("Package")
+            let cache = root.appendingPathComponent("Cache")
+            let scratch = root.appendingPathComponent("Scratch")
+
+            let command = try await SwifterPMCommandParser.parse([
+                "restore",
+                "--package-dir", package.path,
+                "--cache-dir", cache.path,
+                "--scratch-dir", scratch.path,
+            ])
+
+            guard case .restore(let request) = command else {
+                Issue.record("expected restore command")
+                return
+            }
+            #expect(request.packageDirectory == package.standardizedFileURL)
+            #expect(request.cacheDirectory == cache.standardizedFileURL)
+            #expect(request.scratchDirectory == scratch.standardizedFileURL)
+        }
+    }
+
+    @Test
+    func publicCommandParserRejectsConflictingRegistryTransformationFlags() async {
+        await #expect(throws: (any Error).self) {
+            try await SwifterPMCommandParser.parse([
+                "--replace-scm-with-registry",
+                "--use-registry-identity-for-scm",
+                "resolve",
+            ])
+        }
+    }
 }
