@@ -663,6 +663,40 @@ scenario_resolves_pocket_casts_ios() {
   echo "force-resolve=ok"
 }
 
+scenario_resolves_locked_swifterpm_fixture() {
+  local fixture="$1"
+  local expected_pins="$2"
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "${tmp}"' RETURN
+  prepare_isolated_state "${tmp}"
+
+  local package_dir
+  package_dir="$(copy_swifterpm_fixture "${fixture}" "${tmp}")" || return 1
+
+  local expected_resolved="${tmp}/Package.expected.resolved"
+  cp "${package_dir}/Package.resolved" "${expected_resolved}"
+
+  scoped_env "${tmp}" "${SWIFTERPM_BIN}" \
+    --package-path "${package_dir}" \
+    --scratch-path "${package_dir}/.build" \
+    --cache-path "${tmp}/cache" \
+    --skip-update \
+    --quiet \
+    resolve \
+    --print-only >/dev/null || return 1
+  compare_package_resolved_file \
+    "package-resolved" \
+    "${tmp}" \
+    "${expected_resolved}" \
+    "${package_dir}/Package.resolved" || return 1
+
+  echo "pins=$(pin_count "${package_dir}")"
+  test "$(pin_count "${package_dir}")" = "${expected_pins}" || return 1
+  echo "package-resolved=match"
+  echo "skip-update-resolve=ok"
+}
+
 scenario_bazel_apple_rules_restores_dependency_and_links() {
   local tmp
   tmp="$(mktemp -d)"
@@ -921,6 +955,22 @@ Describe "swifterpm resolve against real-world manifests"
     The status should be success
     The output should match pattern "pins=*"
     The output should include "force-resolve=ok"
+  End
+
+  It "resolves the large external dependencies fixture and preserves its lockfile"
+    When call scenario_resolves_locked_swifterpm_fixture "ExternalDependenciesLarge" "69"
+    The status should be success
+    The output should include "pins=69"
+    The output should include "package-resolved=match"
+    The output should include "skip-update-resolve=ok"
+  End
+
+  It "resolves the larger external dependencies fixture and preserves its lockfile"
+    When call scenario_resolves_locked_swifterpm_fixture "ExternalDependenciesLarger" "102"
+    The status should be success
+    The output should include "pins=102"
+    The output should include "package-resolved=match"
+    The output should include "skip-update-resolve=ok"
   End
 End
 
