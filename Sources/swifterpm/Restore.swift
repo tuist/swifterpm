@@ -144,7 +144,7 @@ enum WorkspaceRestorer {
                 packageIdentity: identity,
                 targetName: target.name
             )
-            try await AsyncFileSystem.replaceWithSymlinkedDirectory(
+            try await replaceScratchArtifact(
                 source: cachedArtifact,
                 destination: scratchArtifact
             )
@@ -160,21 +160,43 @@ enum WorkspaceRestorer {
             )
             guard artifactPath.pathExtension.lowercased() == "zip" else { return }
             let identity = context.packageRef["identity"] ?? target.name
+            let checksum = try Hashing.sha256Hex(fileAt: artifactPath)
+            let cachedArtifact = cache.binaryArtifactDirectory(
+                identity: identity,
+                targetName: target.name,
+                checksum: checksum
+            )
+            if try await binaryArtifact(in: cachedArtifact) == nil {
+                try await extractBinaryArtifactArchive(
+                    archivePath: artifactPath,
+                    destination: cachedArtifact
+                )
+            }
             let scratchArtifact = artifactDirectory(
                 scratchDir: scratchDir,
                 packageIdentity: identity,
                 targetName: target.name
             )
-            if try await binaryArtifact(in: scratchArtifact) == nil {
-                try await extractBinaryArtifactArchive(
-                    archivePath: artifactPath,
-                    destination: scratchArtifact
-                )
-            }
+            try await replaceScratchArtifact(
+                source: cachedArtifact,
+                destination: scratchArtifact
+            )
             if !quiet {
-                print("restored \(identity).\(target.name) -> \(scratchArtifact.path)")
+                print("restored \(identity).\(target.name) -> \(cachedArtifact.path)")
             }
         }
+    }
+
+    private static func replaceScratchArtifact(source: URL, destination: URL) async throws {
+        let lock = try await PathLock.acquire(
+            at: destination.deletingLastPathComponent()
+                .appendingPathComponent(".\(destination.lastPathComponent).lock")
+        )
+        _ = lock
+        try await AsyncFileSystem.replaceWithSymlinkedDirectory(
+            source: source,
+            destination: destination
+        )
     }
 
     private static func downloadBinaryArtifact(
@@ -241,6 +263,19 @@ enum WorkspaceRestorer {
         archivePath: URL,
         destination: URL
     ) async throws {
+        try await AsyncFileSystem.createDirectory(
+            at: destination.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let lock = try await PathLock.acquire(
+            at: destination.deletingLastPathComponent()
+                .appendingPathComponent(".\(destination.lastPathComponent).lock")
+        )
+        _ = lock
+        if try await binaryArtifact(in: destination) != nil {
+            return
+        }
+
         let temp = try await AsyncFileSystem.temporaryDirectory(
             in: destination.deletingLastPathComponent()
         )

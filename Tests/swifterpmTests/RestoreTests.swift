@@ -425,6 +425,54 @@ struct RestoreTests {
         }
     }
 
+    @Test
+    func restorePackageSerializesDuplicateLocalBinaryArchiveExtraction() async throws {
+        try await withTemporaryDirectory { root in
+            let package = root.appendingPathComponent("Package")
+            let scratch = root.appendingPathComponent("scratch")
+            let cache = try await Cache(root: root.appendingPathComponent("cache"))
+            let zipPath = try await makeXCFrameworkZip(root: root, targetName: "Foo")
+            let checksum = try Hashing.sha256Hex(await AsyncFileSystem.readData(from: zipPath))
+            try await writeCachedManifest(
+                localBinaryTargetManifest(name: "Foo", path: "Foo.zip"),
+                packageDir: package
+            )
+            try await AsyncFileSystem.writeData(
+                await AsyncFileSystem.readData(from: zipPath),
+                to: package.appendingPathComponent("Foo.zip")
+            )
+
+            let resolved = ResolvedPins(originHash: "origin", pins: [], version: 3)
+            async let first: Void = WorkspaceRestorer.restorePackage(
+                scratchDir: scratch,
+                packageDir: package,
+                cache: cache,
+                registryConfig: RegistryConfig(),
+                resolved: resolved,
+                quiet: true
+            )
+            async let second: Void = WorkspaceRestorer.restorePackage(
+                scratchDir: scratch,
+                packageDir: package,
+                cache: cache,
+                registryConfig: RegistryConfig(),
+                resolved: resolved,
+                quiet: true
+            )
+            _ = try await (first, second)
+
+            let artifactPath = scratch
+                .appendingPathComponent("swifterpm/artifacts/package/Foo/Foo.xcframework")
+            let cachedArtifact = cache.binaryArtifactDirectory(
+                identity: "package",
+                targetName: "Foo",
+                checksum: checksum
+            )
+            #expect(try await AsyncFileSystem.exists(artifactPath))
+            #expect(try await AsyncFileSystem.exists(cachedArtifact))
+        }
+    }
+
     private func makeXCFrameworkZip(root: URL, targetName: String) async throws -> URL {
         let archiveRoot = root.appendingPathComponent("archive")
         let framework = archiveRoot.appendingPathComponent("\(targetName).xcframework")
