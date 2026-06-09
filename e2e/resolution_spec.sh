@@ -452,6 +452,23 @@ bazel_in_workspace() {
   )
 }
 
+buck2_unavailable() {
+  ! command -v buck2 >/dev/null 2>&1
+}
+
+buck2_in_workspace() {
+  local tmp="$1"
+  local workspace="$2"
+  shift 2
+
+  (
+    cd "${workspace}" &&
+      scoped_env "${tmp}" buck2 \
+        --isolation-dir swifterpm-e2e \
+        "$@"
+  )
+}
+
 write_bazel_apple_rules_fixture() {
   local workspace="$1"
   local dependency="$2"
@@ -623,6 +640,111 @@ EOF
 EOF
 }
 
+write_buck2_apple_build_fixture() {
+  local workspace="$1"
+  local dependency="$2"
+  local swifterpm_bin="$3"
+  local repo_root="$4"
+
+  mkdir -p \
+    "${dependency}/Sources/E2EDependency" \
+    "${workspace}/build_defs" \
+    "${workspace}/toolchains" \
+    "${workspace}/Sources/Runner"
+
+  cp "${repo_root}/swifterpm/buck2/swifterpm.bzl" "${workspace}/build_defs/swifterpm.bzl"
+
+  cat >"${dependency}/Package.swift" <<'EOF'
+// swift-tools-version:6.0
+import PackageDescription
+
+let package = Package(
+    name: "Dependency",
+    products: [
+        .library(name: "E2EDependency", targets: ["E2EDependency"]),
+    ],
+    targets: [
+        .target(name: "E2EDependency"),
+    ]
+)
+EOF
+
+  cat >"${dependency}/Sources/E2EDependency/E2EDependency.swift" <<'EOF'
+public enum E2EDependency {
+    public static func message() -> String {
+        "linked-from-buck2-restored-checkout"
+    }
+}
+EOF
+
+  cat >"${workspace}/Package.swift" <<'EOF'
+// swift-tools-version:6.0
+import PackageDescription
+
+let package = Package(
+    name: "Buck2AppleIntegrationApp",
+    platforms: [
+        .macOS(.v15),
+    ],
+    dependencies: [
+        .package(url: "../Dependency", from: "1.0.0"),
+        .package(url: "https://github.com/apple/swift-log.git", exact: "1.12.1"),
+    ],
+    targets: [
+        .executableTarget(
+            name: "Runner",
+            dependencies: [
+                .product(name: "E2EDependency", package: "Dependency"),
+            ]
+        ),
+    ]
+)
+EOF
+
+  cat >"${workspace}/.buckconfig" <<'EOF'
+[cells]
+root = .
+prelude = prelude
+toolchains = toolchains
+none = none
+
+[cell_aliases]
+config = prelude
+fbcode = none
+fbsource = none
+buck = none
+
+[external_cells]
+prelude = bundled
+
+[parser]
+target_platform_detector_spec = target:root//...->prelude//platforms:default
+EOF
+
+  cat >"${workspace}/BUCK" <<EOF
+load("//build_defs:swifterpm.bzl", "swifterpm_restore")
+
+swifterpm_restore(
+    name = "restore_swift_packages",
+    package = "Package.swift",
+    swifterpm = "${swifterpm_bin}",
+    visibility = ["PUBLIC"],
+)
+EOF
+
+  cat >"${workspace}/toolchains/BUCK" <<'EOF'
+load("@prelude//toolchains:demo.bzl", "system_demo_toolchains")
+
+system_demo_toolchains()
+EOF
+
+  cat >"${workspace}/Sources/Runner/main.swift" <<'EOF'
+import E2EDependency
+
+print(E2EDependency.message())
+EOF
+}
+
 scenario_resolves_firefox_ios() {
   local tmp
   tmp="$(mktemp -d)"
@@ -758,6 +880,74 @@ scenario_bazel_apple_rules_restores_dependency_and_links() {
   echo "remote-checkout=present"
   echo "apple-rules-link=ok"
   echo "app-output=$(grep -m 1 "linked-from-restored-checkout:remote-dependency-linked:info" "${tmp}/app.stdout")"
+}
+
+scenario_buck2_apple_build_rule_restores_dependency_and_links() {
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'buck2 --isolation-dir swifterpm-e2e kill >/dev/null 2>&1 || true; rm -rf "${tmp}"' RETURN
+  prepare_isolated_state "${tmp}"
+
+  local workspace="${tmp}/workspace"
+  local dependency="${tmp}/Dependency"
+  local swifterpm_bin
+  swifterpm_bin="$(cd "$(dirname "${SWIFTERPM_BIN}")" && pwd -P)/$(basename "${SWIFTERPM_BIN}")"
+  local repo_root
+  repo_root="$(pwd -P)"
+
+  write_buck2_apple_build_fixture \
+    "${workspace}" \
+    "${dependency}" \
+    "${swifterpm_bin}" \
+    "${repo_root}" || return 1
+  init_git_package "${tmp}" "${dependency}" || return 1
+  tag_git_package "${tmp}" "${dependency}" "1.0.0" || return 1
+
+  buck2_in_workspace "${tmp}" "${workspace}" run :restore_swift_packages \
+    >"${tmp}/restore.stdout" 2>"${tmp}/restore.stderr" || {
+      cat "${tmp}/restore.stderr" >&2
+      cat "${tmp}/restore.stdout" >&2
+      return 1
+    }
+
+  local checkout_source="${workspace}/.build/checkouts/Dependency/Sources/E2EDependency/E2EDependency.swift"
+  if [[ ! -f "${checkout_source}" ]]; then
+    find "${workspace}/.build" -maxdepth 4 -print >&2 || true
+    return 1
+  fi
+  local remote_checkout_source="${workspace}/.build/checkouts/swift-log/Sources/Logging/Logger.swift"
+  if [[ ! -f "${remote_checkout_source}" ]]; then
+    find "${workspace}/.build" -maxdepth 5 -print >&2 || true
+    return 1
+  fi
+
+  swiftc \
+    -emit-library \
+    -emit-module \
+    -module-name E2EDependency \
+    "${checkout_source}" \
+    -o "${tmp}/libE2EDependency.dylib" || return 1
+  swiftc \
+    -I "${tmp}" \
+    -L "${tmp}" \
+    -lE2EDependency \
+    "${workspace}/Sources/Runner/main.swift" \
+    -o "${tmp}/Runner" || return 1
+  DYLD_LIBRARY_PATH="${tmp}" "${tmp}/Runner" >"${tmp}/app.stdout" 2>"${tmp}/app.stderr" || {
+    cat "${tmp}/app.stderr" >&2
+    cat "${tmp}/app.stdout" >&2
+    return 1
+  }
+  grep -q "linked-from-buck2-restored-checkout" "${tmp}/app.stdout" || {
+    cat "${tmp}/app.stderr" >&2
+    cat "${tmp}/app.stdout" >&2
+    return 1
+  }
+
+  echo "checkout=present"
+  echo "remote-checkout=present"
+  echo "buck2-restore-rule=ok"
+  echo "app-output=$(grep -m 1 "linked-from-buck2-restored-checkout" "${tmp}/app.stdout")"
 }
 
 scenario_resolves_swiftpm_external_simple() {
@@ -984,6 +1174,20 @@ Describe "swifterpm Bazel Apple rules integration"
     The output should include "remote-checkout=present"
     The output should include "apple-rules-link=ok"
     The output should include "app-output=linked-from-restored-checkout:remote-dependency-linked:info"
+  End
+End
+
+Describe "swifterpm Buck2 Apple build setup integration"
+  Skip if "requires macOS Swift toolchain" not_darwin
+  Skip if "requires buck2" buck2_unavailable
+
+  It "restores a dependency into .build/checkouts and links it from an Apple build setup"
+    When call scenario_buck2_apple_build_rule_restores_dependency_and_links
+    The status should be success
+    The output should include "checkout=present"
+    The output should include "remote-checkout=present"
+    The output should include "buck2-restore-rule=ok"
+    The output should include "app-output=linked-from-buck2-restored-checkout"
   End
 End
 

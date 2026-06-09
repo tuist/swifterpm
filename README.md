@@ -87,6 +87,30 @@ swift_deps.configure_swifterpm(
 
 This currently covers the resolver helper API. It does not yet synthesize `swiftpkg_<identity>` Bazel build repositories for package targets.
 
+## Buck2 Apple build setup
+
+For Buck2-based Apple builds, `swifterpm` ships a small macro that creates an executable restore target. Copy or vendor [swifterpm/buck2/swifterpm.bzl](swifterpm/buck2/swifterpm.bzl), then load it from your `BUCK` file:
+
+```python
+load("//build_defs:swifterpm.bzl", "swifterpm_restore")
+
+swifterpm_restore(
+    name = "restore_swift_packages",
+    package = "Package.swift",
+)
+```
+
+Run it before Apple build targets that read sources from `.build/checkouts`:
+
+```sh
+buck2 run //:restore_swift_packages
+buck2 build //App:App
+```
+
+The generated target runs `swifterpm resolve --print-only --write` followed by `swifterpm restore`. It uses `swifterpm` from `PATH` by default, or `SWIFTERPM_BIN` when set. If the package root differs from the Buck2 invocation directory, set `SWIFTERPM_PACKAGE_ROOT` to the directory containing `Package.swift`.
+
+This currently provides the restore hook for Apple build setup. It does not synthesize Buck2 targets for Swift package products.
+
 ## Build from source
 
 Build the command-line binary:
