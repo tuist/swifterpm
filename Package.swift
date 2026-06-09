@@ -16,6 +16,10 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-crypto.git", exact: "3.15.1"),
         .package(url: "https://github.com/apple/swift-nio.git", exact: "2.99.0"),
         .package(url: "https://github.com/swiftlang/swift-subprocess.git", exact: "0.4.0"),
+        .package(
+            url: "https://github.com/swiftlang/swift-package-manager.git",
+            revision: "e5ac741fed39ebd16df924d3dbfa904a1c332079"
+        ),
     ],
     targets: [
         .target(
@@ -24,6 +28,7 @@ let package = Package(
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux])),
                 .product(name: "_NIOFileSystem", package: "swift-nio"),
+                .product(name: "SwiftPMDataModel-auto", package: "swift-package-manager"),
                 .product(name: "Subprocess", package: "swift-subprocess"),
             ],
             path: "Sources/swifterpm"
