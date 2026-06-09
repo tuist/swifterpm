@@ -843,7 +843,7 @@ enum WorkspaceRestorer {
             "object": [
                 "artifacts": artifacts,
                 "dependencies": dependencies,
-                "prebuilts": [],
+                "prebuilts": try await existingWorkspacePrebuilts(scratchDir: scratchDir),
             ],
             "version": 7,
         ]
@@ -852,6 +852,36 @@ enum WorkspaceRestorer {
             JSONFormatter.prettyData(state),
             to: scratchDir.appendingPathComponent("workspace-state.json")
         )
+    }
+
+    private static func existingWorkspacePrebuilts(scratchDir: URL) async throws -> [[String: Any]] {
+        let statePath = scratchDir.appendingPathComponent("workspace-state.json")
+        guard try await AsyncFileSystem.exists(statePath) else { return [] }
+
+        let state = try JSONSerialization.jsonObject(
+            with: await AsyncFileSystem.readData(from: statePath)
+        ) as? [String: Any]
+        let object = state?["object"] as? [String: Any]
+
+        return (object?["prebuilts"] as? [[String: Any]])?.map(sanitizeWorkspacePrebuilt) ?? []
+    }
+
+    private static func sanitizeWorkspacePrebuilt(_ prebuilt: [String: Any]) -> [String: Any] {
+        var sanitized = prebuilt
+        if let path = prebuilt["path"] as? String {
+            sanitized["path"] = sanitizedWorkspaceStatePath(path)
+        }
+        if let checkoutPath = prebuilt["checkoutPath"] as? String {
+            sanitized["checkoutPath"] = sanitizedWorkspaceStatePath(checkoutPath)
+        }
+        if let includePath = prebuilt["includePath"] as? [String] {
+            sanitized["includePath"] = includePath.map(sanitizedWorkspaceStatePath)
+        }
+        return sanitized
+    }
+
+    private static func sanitizedWorkspaceStatePath(_ path: String) -> String {
+        String(path.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) })
     }
 
     private static func workspaceArtifacts(
