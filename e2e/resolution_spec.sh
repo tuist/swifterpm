@@ -1264,6 +1264,63 @@ scenario_resolves_transitive_local_file_system_dependencies() {
   echo "local-identities=${identities}"
 }
 
+scenario_resolves_pubgrub_shared_dependency_intersection() {
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "${tmp}"' RETURN
+  prepare_isolated_state "${tmp}"
+
+  local fixture_dir
+  fixture_dir="$(copy_swifterpm_fixture "PubGrubSharedDependency" "${tmp}")" || return 1
+
+  init_git_package "${tmp}" "${fixture_dir}/A" || return 1
+  tag_git_package "${tmp}" "${fixture_dir}/A" "1.0.0" || return 1
+  init_git_package "${tmp}" "${fixture_dir}/B" || return 1
+  tag_git_package "${tmp}" "${fixture_dir}/B" "1.0.0" || return 1
+  init_git_package "${tmp}" "${fixture_dir}/Shared" || return 1
+  tag_git_package "${tmp}" "${fixture_dir}/Shared" \
+    "2.0.0" "3.0.0" "3.6.9" "4.0.0" "5.0.0" || return 1
+
+  local package_dir="${fixture_dir}/App"
+  compare_swiftpm_state_files "${tmp}" "${package_dir}" || return 1
+  swiftpm_accepts_lockfile "${tmp}" "${package_dir}" "${tmp}/swift-cache" || return 1
+
+  local shared_version
+  shared_version="$(pin_state_value "${package_dir}" "shared" "version")"
+  test "${shared_version}" = "3.6.9" || return 1
+
+  echo "pins=$(pin_count "${package_dir}")"
+  echo "shared-version=${shared_version}"
+  echo "force-resolve=ok"
+}
+
+scenario_resolves_pubgrub_release_over_prerelease() {
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "${tmp}"' RETURN
+  prepare_isolated_state "${tmp}"
+
+  local fixture_dir
+  fixture_dir="$(copy_swifterpm_fixture "PubGrubReleaseOverPrerelease" "${tmp}")" || return 1
+
+  init_git_package "${tmp}" "${fixture_dir}/A" || return 1
+  tag_git_package "${tmp}" "${fixture_dir}/A" "1.0.0" || return 1
+  init_git_package "${tmp}" "${fixture_dir}/B" || return 1
+  tag_git_package "${tmp}" "${fixture_dir}/B" "1.0.0-prerelease-20240616" "1.0.0" || return 1
+
+  local package_dir="${fixture_dir}/App"
+  compare_swiftpm_state_files "${tmp}" "${package_dir}" || return 1
+  swiftpm_accepts_lockfile "${tmp}" "${package_dir}" "${tmp}/swift-cache" || return 1
+
+  local b_version
+  b_version="$(pin_state_value "${package_dir}" "b" "version")"
+  test "${b_version}" = "1.0.0" || return 1
+
+  echo "pins=$(pin_count "${package_dir}")"
+  echo "b-version=${b_version}"
+  echo "force-resolve=ok"
+}
+
 scenario_manifest_cache_stays_under_build_directory() {
   local tmp
   tmp="$(mktemp -d)"
@@ -1394,6 +1451,26 @@ Describe "swifterpm resolve against SwiftPM dependency graph fixtures"
     The status should be success
     The output should include "workspace-state=match"
     The output should include "local-identities=localone localtwo"
+  End
+
+  It "matches SwiftPM's shared dependency intersection scenario"
+    When call scenario_resolves_pubgrub_shared_dependency_intersection
+    The status should be success
+    The output should include "pins=3"
+    The output should include "shared-version=3.6.9"
+    The output should include "package-resolved=match"
+    The output should include "workspace-state=match"
+    The output should include "force-resolve=ok"
+  End
+
+  It "matches SwiftPM's release-over-prerelease scenario"
+    When call scenario_resolves_pubgrub_release_over_prerelease
+    The status should be success
+    The output should include "pins=2"
+    The output should include "b-version=1.0.0"
+    The output should include "package-resolved=match"
+    The output should include "workspace-state=match"
+    The output should include "force-resolve=ok"
   End
 End
 
