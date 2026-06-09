@@ -398,8 +398,8 @@ enum WorkspaceRestorer {
     ) -> URL {
         scratchDir
             .appendingPathComponent("artifacts")
-            .appendingPathComponent(packageIdentity)
-            .appendingPathComponent(targetName)
+            .appendingPathComponent(SafePathComponent.make(packageIdentity))
+            .appendingPathComponent(SafePathComponent.make(targetName))
     }
 
     private static func binaryTargetPath(

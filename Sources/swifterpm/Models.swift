@@ -97,10 +97,11 @@ enum PinKind {
     static func checkoutDirectoryName(_ pin: ResolvedPin) -> String {
         let trimmed = pin.location.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let withoutGit = trimmed.hasSuffix(".git") ? String(trimmed.dropLast(4)) : trimmed
-        return withoutGit.split(separator: "/").last.map(String.init).flatMap {
+        let name = withoutGit.split(separator: "/").last.map(String.init).flatMap {
             $0.isEmpty ? nil : $0
         }
             ?? pin.identity
+        return SafePathComponent.make(name)
     }
 
     static func registryIdentityParts(_ identity: String) throws -> (String, String) {
@@ -113,6 +114,10 @@ enum PinKind {
 
     static func registryDownloadSubpath(_ pin: ResolvedPin) throws -> String {
         let (scope, name) = try PinKind.registryIdentityParts(pin.identity)
-        return try "\(scope)/\(name)/\(pin.versionString())"
+        return try [
+            SafePathComponent.make(scope),
+            SafePathComponent.make(name),
+            SafePathComponent.make(pin.versionString()),
+        ].joined(separator: "/")
     }
 }

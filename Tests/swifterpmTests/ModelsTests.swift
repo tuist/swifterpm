@@ -52,6 +52,25 @@ struct ModelsTests {
     }
 
     @Test
+    func generatedPackagePathComponentsAreSanitized() throws {
+        let sourcePin = ResolvedPin(
+            identity: "bad/identity",
+            kind: "remoteSourceControl",
+            location: "file:///tmp/Foo%0ABar.git",
+            state: ResolvedState(branch: nil, revision: "abcdef1234567890", version: nil)
+        )
+        let registryPin = ResolvedPin(
+            identity: "example.bad/package",
+            kind: "registry",
+            location: "",
+            state: ResolvedState(branch: nil, revision: nil, version: "1.2.3\nbeta")
+        )
+
+        #expect(PinKind.checkoutDirectoryName(sourcePin) == "Foo_0ABar")
+        #expect(try PinKind.registryDownloadSubpath(registryPin) == "example/bad_package/1.2.3_beta")
+    }
+
+    @Test
     func readAndWriteResolvedFileRoundTripsInsidePackageDirectory() async throws {
         try await withTemporaryDirectory { root in
             try await writeMinimalPackageManifest(at: root, name: "Fixture")

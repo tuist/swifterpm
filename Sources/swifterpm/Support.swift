@@ -333,6 +333,16 @@ enum SafeFileName {
     }
 }
 
+enum SafePathComponent {
+    static func make(_ name: String) -> String {
+        let sanitized = SafeFileName.make(name)
+        if sanitized.isEmpty || sanitized.allSatisfy({ $0 == "." }) {
+            return "_"
+        }
+        return sanitized
+    }
+}
+
 enum PathCanonicalizer {
     static func realpath(_ url: URL) -> URL {
         #if os(Windows)
