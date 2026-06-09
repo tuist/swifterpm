@@ -20,3 +20,7 @@ Review Swift changes for SwifterPM with the same standards as a maintainer revie
 - Explain the user-visible failure mode and the smallest practical fix.
 - Do not use em dashes in GitHub review comments.
 - Write comments as if Pepicrft wrote them directly. Do not mention AI assistance.
+- Return only valid JSON in Blick's review format. Use exactly these top-level keys: `summary` and `findings`.
+- Each finding must use exactly these keys: `severity`, `file`, `line`, `title`, and `body`.
+- `severity` must be one of `high`, `medium`, or `low`.
+- Keep finding bodies plain text. Do not include markdown code fences, JSON snippets, escaped newlines, or interpolated code placeholders.
