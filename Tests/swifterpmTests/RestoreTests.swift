@@ -295,7 +295,7 @@ struct RestoreTests {
             let packageRef = try #require(artifact["packageRef"] as? [String: Any])
             let source = try #require(artifact["source"] as? [String: Any])
             let artifactPath = scratch
-                .appendingPathComponent("artifacts/binary/Foo/Foo.xcframework")
+                .appendingPathComponent("swifterpm/artifacts/binary/Foo/Foo.xcframework")
 
             #expect(artifacts.count == 1)
             #expect(artifact["targetName"] as? String == "Foo")
@@ -306,6 +306,9 @@ struct RestoreTests {
             #expect(source["url"] as? String == artifactURL)
             #expect(source["checksum"] as? String == checksum)
             #expect(try await AsyncFileSystem.exists(artifactPath))
+            #expect(
+                try await !AsyncFileSystem.exists(
+                    scratch.appendingPathComponent("artifacts/binary")))
         }
     }
 

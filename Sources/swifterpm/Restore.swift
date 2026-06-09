@@ -399,6 +399,7 @@ enum WorkspaceRestorer {
         targetName: String
     ) -> URL {
         scratchDir
+            .appendingPathComponent("swifterpm")
             .appendingPathComponent("artifacts")
             .appendingPathComponent(SafePathComponent.make(packageIdentity))
             .appendingPathComponent(SafePathComponent.make(targetName))
