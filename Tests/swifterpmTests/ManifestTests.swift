@@ -95,6 +95,148 @@ struct ManifestTests {
     }
 
     @Test
+    func parseRequiredManifestDependenciesIgnoresTestOnlyDependencies() throws {
+        let manifest: [String: Any] = [
+            "products": [
+                [
+                    "name": "Library",
+                    "targets": ["Library"],
+                ]
+            ],
+            "targets": [
+                [
+                    "name": "Library",
+                    "dependencies": [],
+                ],
+                [
+                    "name": "LibraryTests",
+                    "type": "test",
+                    "dependencies": [
+                        ["product": ["Nimble", "Nimble"]]
+                    ],
+                ],
+            ],
+            "dependencies": [
+                [
+                    "sourceControl": [
+                        sourceDependency(identity: "Nimble")
+                    ]
+                ]
+            ],
+        ]
+
+        let dependencies = try ManifestParser.requiredDependencies(manifest)
+
+        #expect(dependencies.isEmpty)
+    }
+
+    @Test
+    func parseRequiredManifestDependenciesIgnoresDependenciesUnusedByProducts() throws {
+        let manifest: [String: Any] = [
+            "products": [
+                [
+                    "name": "Library",
+                    "targets": ["Library"],
+                ]
+            ],
+            "targets": [
+                [
+                    "name": "Library",
+                    "dependencies": [
+                        ["product": ["FooProduct", "Foo"]]
+                    ],
+                ]
+            ],
+            "dependencies": [
+                [
+                    "sourceControl": [
+                        sourceDependency(identity: "Foo"),
+                        sourceDependency(identity: "Unused"),
+                    ]
+                ]
+            ],
+        ]
+
+        let dependencies = try ManifestParser.requiredDependencies(manifest)
+
+        #expect(dependencies.map(\.identity) == ["Foo"])
+    }
+
+    @Test
+    func parseRequiredManifestDependenciesFollowsExplicitTargetDependencies() throws {
+        let manifest: [String: Any] = [
+            "products": [
+                [
+                    "name": "Library",
+                    "targets": ["LibraryTarget"],
+                ]
+            ],
+            "targets": [
+                [
+                    "name": "LibraryTarget",
+                    "dependencies": [
+                        ["target": ["ImplementationTarget", nil]]
+                    ],
+                ],
+                [
+                    "name": "ImplementationTarget",
+                    "dependencies": [
+                        ["product": ["Abseil", "abseil-cpp-binary", nil, nil]]
+                    ],
+                ],
+            ],
+            "dependencies": [
+                [
+                    "sourceControl": [
+                        sourceDependency(identity: "abseil-cpp-binary"),
+                        sourceDependency(identity: "Unused"),
+                    ]
+                ]
+            ],
+        ]
+
+        let dependencies = try ManifestParser.requiredDependencies(manifest)
+
+        #expect(dependencies.map(\.identity) == ["abseil-cpp-binary"])
+    }
+
+    @Test
+    func parseRequiredManifestDependenciesMatchesPackageAliases() throws {
+        let sentry = sourceDependency(identity: "sentry-cocoa").merging(
+            ["nameForTargetDependencyResolutionOnly": "Sentry"],
+            uniquingKeysWith: { _, new in new }
+        )
+        let manifest: [String: Any] = [
+            "products": [
+                [
+                    "name": "Library",
+                    "targets": ["Library"],
+                ]
+            ],
+            "targets": [
+                [
+                    "name": "Library",
+                    "dependencies": [
+                        ["byName": ["Sentry", nil]]
+                    ],
+                ]
+            ],
+            "dependencies": [
+                [
+                    "sourceControl": [
+                        sentry,
+                        sourceDependency(identity: "Unused"),
+                    ]
+                ]
+            ],
+        ]
+
+        let dependencies = try ManifestParser.requiredDependencies(manifest)
+
+        #expect(dependencies.map(\.identity) == ["sentry-cocoa"])
+    }
+
+    @Test
     func parseManifestFileSystemDependenciesUsesFallbackName() throws {
         let manifest: [String: Any] = [
             "dependencies": [

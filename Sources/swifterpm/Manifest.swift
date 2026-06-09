@@ -10,6 +10,21 @@ struct ManifestDependency: Sendable {
     let kind: ManifestDependencyKind
     let location: String
     let requirement: Requirement
+    let nameForTargetDependencyResolutionOnly: String?
+
+    init(
+        identity: String,
+        kind: ManifestDependencyKind,
+        location: String,
+        requirement: Requirement,
+        nameForTargetDependencyResolutionOnly: String? = nil
+    ) {
+        self.identity = identity
+        self.kind = kind
+        self.location = location
+        self.requirement = requirement
+        self.nameForTargetDependencyResolutionOnly = nameForTargetDependencyResolutionOnly
+    }
 }
 
 struct ManifestFileSystemDependency: Sendable {
@@ -174,7 +189,9 @@ enum ManifestParser {
                             identity: identity,
                             kind: .sourceControl,
                             location: location,
-                            requirement: requirement(requirementJSON)
+                            requirement: requirement(requirementJSON),
+                            nameForTargetDependencyResolutionOnly:
+                                dependency["nameForTargetDependencyResolutionOnly"] as? String
                         ))
                 }
             }
@@ -246,12 +263,6 @@ enum ManifestParser {
                 }
             }
         }
-        for target in targets where target["type"] as? String == "test" {
-            if let name = target["name"] as? String {
-                pendingTargets.append(name)
-            }
-        }
-
         var references = Set<String>()
         var visitedTargets = Set<String>()
 
@@ -280,6 +291,12 @@ enum ManifestParser {
                         references.insert(normalizeDependencyReference(name))
                     }
                 }
+                if let target = dependency["target"] as? [Any],
+                   let name = target.first as? String,
+                   targetNames.contains(name)
+                {
+                    pendingTargets.append(name)
+                }
             }
         }
 
@@ -289,6 +306,9 @@ enum ManifestParser {
     private static func dependencyReferenceNames(_ dependency: ManifestDependency) -> Set<String> {
         var names = Set<String>()
         names.insert(normalizeDependencyReference(dependency.identity))
+        if let name = dependency.nameForTargetDependencyResolutionOnly {
+            names.insert(normalizeDependencyReference(name))
+        }
         if let suffix = dependency.identity.split(separator: ".").last {
             names.insert(normalizeDependencyReference(String(suffix)))
         }
