@@ -84,6 +84,10 @@ enum AsyncFileSystem {
         try await fileSystem.moveItem(at: filePath(source), to: filePath(destination))
     }
 
+    static func copyItem(at source: URL, to destination: URL) async throws {
+        try await fileSystem.copyItem(at: filePath(source), to: filePath(destination))
+    }
+
     static func createSymbolicLink(at url: URL, withDestinationURL destination: URL) async throws {
         try await fileSystem.createSymbolicLink(
             at: filePath(url),

@@ -1068,6 +1068,7 @@ scenario_replace_scm_with_registry_uses_registry() {
   test "${identity}" = "example.registryfoo" || return 1
   test "${kind}" = "registry" || return 1
   test -e "${package_dir}/.build/registry/downloads/example/registryfoo/1.0.0/Package.swift" || return 1
+  test ! -L "${package_dir}/.build/registry/downloads/example/registryfoo/1.0.0" || return 1
   test ! -e "${package_dir}/.build/checkouts/RegistryFoo" || return 1
 
   local archive
@@ -1086,6 +1087,7 @@ scenario_replace_scm_with_registry_uses_registry() {
     restore >/dev/null
 
   test -e "${package_dir}/.build/registry/downloads/example/registryfoo/1.0.0/Package.swift" || return 1
+  test ! -L "${package_dir}/.build/registry/downloads/example/registryfoo/1.0.0" || return 1
 
   stop_registry_server
   echo "identity=${identity}"

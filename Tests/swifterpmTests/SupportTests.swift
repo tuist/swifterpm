@@ -74,6 +74,26 @@ struct SupportTests {
     }
 
     @Test
+    func replaceWithCopiedDirectoryMaterializesDirectory() async throws {
+        try await withTemporaryDirectory { root in
+            let source = root.appendingPathComponent("source")
+            let destination = root.appendingPathComponent("downloads/example/package/1.0.0")
+            try await AsyncFileSystem.createDirectory(at: source, withIntermediateDirectories: true)
+            try await AsyncFileSystem.atomicWrite(
+                "manifest", to: source.appendingPathComponent("Package.swift"))
+
+            try await AsyncFileSystem.replaceWithCopiedDirectory(
+                source: source, destination: destination)
+            try await AsyncFileSystem.removeItem(at: source)
+
+            #expect(try await AsyncFileSystem.isDirectoryAndNotSymlink(destination))
+            let data = try await AsyncFileSystem.readData(
+                from: destination.appendingPathComponent("Package.swift"))
+            #expect(String(data: data, encoding: .utf8) == "manifest")
+        }
+    }
+
+    @Test
     func temporaryDirectoryAndFileSafeNameUseScopedPaths() async throws {
         try await withTemporaryDirectory { root in
             let temp = try await AsyncFileSystem.temporaryDirectory(in: root)

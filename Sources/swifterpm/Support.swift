@@ -285,6 +285,15 @@ extension AsyncFileSystem {
         try await createSymbolicLink(at: destination, withDestinationURL: source)
     }
 
+    static func replaceWithCopiedDirectory(source: URL, destination: URL) async throws {
+        if try await exists(destination) {
+            try await removePath(destination)
+        }
+        try await createDirectory(
+            at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try await copyItem(at: source, to: destination)
+    }
+
     static func flattenSingleDirectory(_ url: URL) async throws {
         let entries = try await contentsOfDirectory(at: url)
         guard entries.count == 1 else { return }

@@ -512,7 +512,7 @@ enum WorkspaceRestorer {
             )
             let download = try registryDownloads.appendingPathComponent(
                 PinKind.registryDownloadSubpath(pin))
-            try await AsyncFileSystem.replaceWithSymlinkedDirectory(
+            try await AsyncFileSystem.replaceWithCopiedDirectory(
                 source: source, destination: download
             )
             return (pin.identity, source)
