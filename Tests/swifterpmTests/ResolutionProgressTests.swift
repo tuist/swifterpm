@@ -25,9 +25,53 @@ struct ResolutionProgressTests {
         #expect(lines.first == "swifterpm \(swifterpmVersion)")
         #expect(
             lines.contains {
-                $0.contains("   2/4 pkgs · resolving")
+                $0.contains("   2/4 deps · resolving")
             })
         #expect(lines.last?.hasPrefix("✓ resolved 2 packages in ") == true)
+    }
+
+    @Test
+    func interactiveReporterReplacesResolutionProgressLine() {
+        let output = ProgressOutputCollector()
+        let reporter = ResolutionProgressReporter(
+            interactive: true,
+            minimumInterval: 0,
+            writeOutput: { output.appendRaw($0) }
+        )
+
+        reporter.started(rootVersionedDependencies: 1, fixedDependencies: 1)
+        reporter.startedFetchingVersions(package: "foo")
+        reporter.selected(package: "foo", version: "1.2.3")
+        reporter.finishedResolvingFixedPin(package: "bar")
+        reporter.finished(pinCount: 2)
+
+        let raw = output.rawOutput
+        #expect(raw.contains("\r\u{001B}[2K   0/2 deps · resolving"))
+        #expect(raw.contains("\r\u{001B}[2K   2 deps · resolving"))
+        #expect(raw.contains("\r\u{001B}[2K✓ resolved 2 packages in "))
+        #expect(raw.hasSuffix("\n"))
+    }
+
+    @Test
+    func reporterCountsSelectedAndFixedPinsByUniqueIdentity() {
+        let output = ProgressOutputCollector()
+        let reporter = ResolutionProgressReporter(
+            minimumInterval: 0,
+            writeLine: { output.append($0) }
+        )
+
+        reporter.started(rootVersionedDependencies: 1, fixedDependencies: 1)
+        reporter.selected(package: "foo", version: "1.2.3")
+        reporter.finishedResolvingFixedPin(package: "foo")
+
+        #expect(
+            output.lines.contains {
+                $0.contains("   1/2 deps · resolving")
+            })
+        #expect(
+            output.lines.contains {
+                $0.contains("   2/2 deps · resolving")
+            } == false)
     }
 
     @Test
@@ -50,6 +94,7 @@ struct ResolutionProgressTests {
 private final class ProgressOutputCollector: @unchecked Sendable {
     private let lock = NSLock()
     private var storedLines: [String] = []
+    private var storedRawOutput = ""
 
     var lines: [String] {
         lock.lock()
@@ -57,9 +102,21 @@ private final class ProgressOutputCollector: @unchecked Sendable {
         return storedLines
     }
 
+    var rawOutput: String {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedRawOutput
+    }
+
     func append(_ line: String) {
         lock.lock()
         defer { lock.unlock() }
         storedLines.append(line)
+    }
+
+    func appendRaw(_ output: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        storedRawOutput += output
     }
 }

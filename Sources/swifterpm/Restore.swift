@@ -192,9 +192,11 @@ enum WorkspaceRestorer {
             let lock = try await cache.lock(namespace: "artifact-archives", key: archivePath.path)
             _ = lock
             if try await !AsyncFileSystem.exists(archivePath) {
+                let remoteURL = try artifactURL(url)
                 try await HTTPClient.download(
-                    url: artifactURL(url),
-                    destination: archivePath
+                    url: remoteURL,
+                    destination: archivePath,
+                    headers: await HTTPClient.defaultHeaders(for: remoteURL)
                 )
             }
         }

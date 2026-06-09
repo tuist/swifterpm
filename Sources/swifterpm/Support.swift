@@ -113,6 +113,14 @@ enum SystemProcess {
 }
 
 enum HTTPClient {
+    static func defaultHeaders(for url: URL) async -> [String: String] {
+        var headers = ["User-Agent": "swifterpm/0.1"]
+        if let authorization = await HTTPAuthorization.header(for: url) {
+            headers["Authorization"] = authorization
+        }
+        return headers
+    }
+
     static func data(url: URL, headers: [String: String] = [:]) async throws -> Data {
         var request = URLRequest(url: url)
         for (key, value) in headers {
@@ -141,6 +149,56 @@ enum HTTPClient {
         }
 
         try await AsyncFileSystem.replaceFile(downloaded, at: destination)
+    }
+}
+
+enum HTTPAuthorization {
+    static func header(for url: URL) async -> String? {
+        let environment = ProcessInfo.processInfo.environment
+        if isGitHub(url), let token = nonEmpty(environment["GITHUB_TOKEN"] ?? environment["GH_TOKEN"]) {
+            return bearerHeader(token)
+        }
+
+        if let netrcData = nonEmpty(environment["SWIFTPM_NETRC_DATA"]),
+           let credential = RegistryNetrc(content: netrcData).credential(for: url)
+        {
+            return basicHeader(credential)
+        }
+
+        if let home = environment["HOME"] {
+            let netrcPath = URL(fileURLWithPath: home).appendingPathComponent(".netrc")
+            if let data = try? await AsyncFileSystem.readData(from: netrcPath),
+               let content = String(data: data, encoding: .utf8),
+               let credential = RegistryNetrc(content: content).credential(for: url)
+            {
+                return basicHeader(credential)
+            }
+        }
+
+        if isGitHub(url), let token = await GitHubAuth.token() {
+            return bearerHeader(token)
+        }
+
+        return nil
+    }
+
+    private static func isGitHub(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return false }
+        return host == "github.com" || host == "api.github.com"
+    }
+
+    private static func basicHeader(_ credential: RegistryCredential) -> String {
+        let token = Data("\(credential.user):\(credential.password)".utf8).base64EncodedString()
+        return "Basic \(token)"
+    }
+
+    private static func bearerHeader(_ token: String) -> String {
+        "Bearer \(token)"
+    }
+
+    private static func nonEmpty(_ value: String?) -> String? {
+        guard let value, !value.isEmpty else { return nil }
+        return value
     }
 }
 

@@ -16,28 +16,47 @@ final class ResolutionProgressReporter: @unchecked Sendable {
         var fetchedMetadata = Set<String>()
         var inspectedManifests = Set<String>()
         var selectedPackages = Set<String>()
+        var fixedPinPackages = Set<String>()
         var discoveredPackages = 0
-        var fixedPins = 0
         var lastProgressAt = Date.distantPast
         var lastProgressLine: String?
+        var renderedInteractiveProgress = false
     }
 
     private let enabled: Bool
+    private let interactive: Bool
     private let minimumInterval: TimeInterval
-    private let writeLine: @Sendable (String) -> Void
+    private let writeOutput: @Sendable (String) -> Void
     private let lock = NSLock()
     private var state: State?
 
     init(
         enabled: Bool = true,
+        interactive: Bool = TerminalStyle.colorEnabled,
         minimumInterval: TimeInterval = 2,
-        writeLine: @escaping @Sendable (String) -> Void = { line in
-            ResolutionProgressReporter.writeStderr(line)
+        writeOutput: @escaping @Sendable (String) -> Void = { output in
+            ResolutionProgressReporter.writeStderr(output)
         }
     ) {
         self.enabled = enabled
+        self.interactive = interactive
         self.minimumInterval = minimumInterval
-        self.writeLine = writeLine
+        self.writeOutput = writeOutput
+    }
+
+    init(
+        enabled: Bool = true,
+        minimumInterval: TimeInterval,
+        writeLine: @escaping @Sendable (String) -> Void
+    ) {
+        self.enabled = enabled
+        self.interactive = false
+        self.minimumInterval = minimumInterval
+        self.writeOutput = { output in
+            for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
+                writeLine(String(line))
+            }
+        }
     }
 
     func started(rootVersionedDependencies: Int, fixedDependencies: Int) {
@@ -94,7 +113,7 @@ final class ResolutionProgressReporter: @unchecked Sendable {
     func finishedResolvingFixedPin(package: String) {
         withLock {
             guard var current = state else { return }
-            current.fixedPins += 1
+            current.fixedPinPackages.insert(package)
             state = current
         }
         emitProgress()
@@ -106,7 +125,13 @@ final class ResolutionProgressReporter: @unchecked Sendable {
             guard let current = state else { return }
             let elapsed = TerminalStyle.dim(
                 Self.formatDuration(Date().timeIntervalSince(current.startedAt)))
-            writeLine("\(TerminalStyle.green("✓")) resolved \(TerminalStyle.bold("\(pinCount)")) packages in \(elapsed)")
+            let summary =
+                "\(TerminalStyle.green("✓")) resolved \(TerminalStyle.bold("\(pinCount)")) package\(pinCount == 1 ? "" : "s") in \(elapsed)"
+            if interactive, current.renderedInteractiveProgress {
+                writeOutput("\r\u{001B}[2K\(summary)\n")
+            } else {
+                writeLine(summary)
+            }
             state = nil
         }
     }
@@ -127,13 +152,18 @@ final class ResolutionProgressReporter: @unchecked Sendable {
             }
             current.lastProgressAt = now
             current.lastProgressLine = line
-            writeLine(line)
+            if interactive {
+                writeOutput("\r\u{001B}[2K\(line)")
+                current.renderedInteractiveProgress = true
+            } else {
+                writeLine(line)
+            }
             state = current
         }
     }
 
     private static func progressLine(state: State) -> String {
-        let resolvedPackages = state.selectedPackages.count + state.fixedPins
+        let resolvedPackages = state.selectedPackages.union(state.fixedPinPackages).count
         let targetPackages = max(
             state.rootVersionedDependencies + state.fixedDependencies + state.discoveredPackages,
             resolvedPackages
@@ -146,7 +176,7 @@ final class ResolutionProgressReporter: @unchecked Sendable {
             count = paddedCount(resolvedPackages, total: resolvedPackages)
         }
         return
-            "\(TerminalStyle.bold(count)) \(TerminalStyle.dim("pkgs")) \(TerminalStyle.dim("·")) \(TerminalStyle.cyan("resolving"))"
+            "\(TerminalStyle.bold(count)) \(TerminalStyle.dim("deps")) \(TerminalStyle.dim("·")) \(TerminalStyle.cyan("resolving"))"
     }
 
     private static func paddedCount(_ count: Int, total: Int) -> String {
@@ -160,8 +190,12 @@ final class ResolutionProgressReporter: @unchecked Sendable {
         return try body()
     }
 
-    private static func writeStderr(_ line: String) {
-        FileHandle.standardError.write(Data((line + "\n").utf8))
+    private static func writeStderr(_ output: String) {
+        FileHandle.standardError.write(Data(output.utf8))
+    }
+
+    private func writeLine(_ line: String) {
+        writeOutput(line + "\n")
     }
 
     private static func formatDuration(_ seconds: TimeInterval) -> String {
@@ -198,7 +232,7 @@ private enum TerminalStyle {
         return "\u{001B}[\(code)m\(value)\u{001B}[0m"
     }
 
-    private static var colorEnabled: Bool {
+    fileprivate static var colorEnabled: Bool {
         let env = ProcessInfo.processInfo.environment
         if env["NO_COLOR"] != nil {
             return false
