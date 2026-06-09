@@ -263,6 +263,18 @@ enum PackageResolver {
                     guard let semver = registryVersion.semver else { return nil }
                     return ResolvedVersion(version: semver, revision: nil)
                 }
+                if resolved.isEmpty,
+                   package.location != package.identity,
+                   try await PackageResolver.localSourceControlPackageLocation(package.location) != nil
+                       || URL(string: package.location)?.scheme != nil
+                {
+                    let remote = try await RemoteMetadata.versions(
+                        location: package.location, cache: cache)
+                    resolved = remote.compactMap { remoteVersion in
+                        guard let semver = remoteVersion.semver else { return nil }
+                        return ResolvedVersion(version: semver, revision: remoteVersion.revision)
+                    }
+                }
             }
             resolved.sort { $0.version < $1.version }
             return resolved
@@ -317,6 +329,9 @@ enum PackageResolver {
             case .sourceControl:
                 return try await WorkspaceRestorer.ensureSource(cache: cache, pin: pin)
             case .registry:
+                if PinKind.isSourceControl(pin.kind) {
+                    return try await WorkspaceRestorer.ensureSource(cache: cache, pin: pin)
+                }
                 return try await WorkspaceRestorer.ensureRegistrySource(
                     cache: cache, registryConfig: registryConfig, pin: pin)
             }
@@ -353,6 +368,18 @@ enum PackageResolver {
                         branch: nil, revision: revision, version: version.description)
                 )
             case .registry:
+                let versions = try await resolvedVersions(package)
+                if let resolvedVersion = versions.first(where: { $0.version == version }),
+                   let revision = resolvedVersion.revision
+                {
+                    return ResolvedPin(
+                        identity: package.identity,
+                        kind: try await PackageResolver.sourceControlKind(location: package.location),
+                        location: package.location,
+                        state: ResolvedState(
+                            branch: nil, revision: revision, version: version.description)
+                    )
+                }
                 return ResolvedPin(
                     identity: package.identity,
                     kind: "registry",
@@ -382,6 +409,16 @@ enum PackageResolver {
                         version: resolvedVersion.version.description)
                 )
             case .registry:
+                if let revision = resolvedVersion.revision {
+                    return ResolvedPin(
+                        identity: package.identity,
+                        kind: try await PackageResolver.sourceControlKind(location: package.location),
+                        location: package.location,
+                        state: ResolvedState(
+                            branch: nil, revision: revision,
+                            version: resolvedVersion.version.description)
+                    )
+                }
                 return ResolvedPin(
                     identity: package.identity,
                     kind: "registry",
@@ -467,7 +504,7 @@ enum PackageResolver {
                 return ManifestDependency(
                     identity: registryIdentity,
                     kind: .registry,
-                    location: registryIdentity,
+                    location: dependency.location,
                     requirement: dependency.requirement
                 )
             }

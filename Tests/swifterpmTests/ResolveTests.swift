@@ -63,7 +63,7 @@ struct ResolveTests {
         let dependency = try #require(transformed.first)
         #expect(dependency.identity == "apple.swift-log")
         #expect(dependency.kind == .registry)
-        #expect(dependency.location == "apple.swift-log")
+        #expect(dependency.location == "https://github.com/apple/swift-log.git")
     }
 
     @Test

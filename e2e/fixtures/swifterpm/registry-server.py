@@ -26,6 +26,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_json({"identifiers": ["example.registryfoo"]})
             return
         if parsed.path == "/example/registryfoo":
+            if (registry_dir / "no-releases").exists():
+                self.send_json({"releases": {}})
+                return
             self.send_json({"releases": {"1.0.0": {}}})
             return
         if parsed.path == "/example/registryfoo/1.0.0":

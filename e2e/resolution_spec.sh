@@ -1128,6 +1128,62 @@ scenario_replace_scm_with_registry_uses_registry() {
   echo "corrupt-archive-redownload=ok"
 }
 
+scenario_replace_scm_with_registry_falls_back_to_scm_when_registry_has_no_versions() {
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'stop_registry_server; rm -rf "${tmp}"' RETURN
+  prepare_isolated_state "${tmp}"
+
+  local registry_dir="${tmp}/registry"
+  mkdir -p "${registry_dir}"
+  touch "${registry_dir}/no-releases"
+  start_registry_server "${tmp}" "${registry_dir}" || return 1
+  local registry_url="http://127.0.0.1:${REGISTRY_SERVER_PORT}"
+
+  local fixture_dir
+  fixture_dir="$(copy_swifterpm_fixture "RegistryFallbackToSCM" "${tmp}")" || return 1
+
+  local dependency_dir="${fixture_dir}/LocalRegistryFoo"
+  init_git_package "${tmp}" "${dependency_dir}" || return 1
+  tag_git_package "${tmp}" "${dependency_dir}" "1.0.0" || return 1
+  dependency_dir="$(canonical_path "${dependency_dir}")"
+
+  local package_dir="${fixture_dir}/App"
+
+  scoped_env "${tmp}" "${SWIFTERPM_BIN}" \
+    --package-path "${package_dir}" \
+    --scratch-path "${package_dir}/.build" \
+    --cache-path "${tmp}/cache" \
+    --default-registry-url "${registry_url}" \
+    --replace-scm-with-registry \
+    --disable-package-info-cache \
+    --quiet \
+    resolve >/dev/null
+
+  local identity
+  identity="$(jq -r '.pins[0].identity' "${package_dir}/Package.resolved")"
+  local kind
+  kind="$(jq -r '.pins[0].kind' "${package_dir}/Package.resolved")"
+  local location
+  location="$(jq -r '.pins[0].location' "${package_dir}/Package.resolved")"
+  local version
+  version="$(jq -r '.pins[0].state.version' "${package_dir}/Package.resolved")"
+
+  test "${identity}" = "example.registryfoo" || return 1
+  test "${kind}" = "localSourceControl" || return 1
+  test "${location}" = "${dependency_dir}" || return 1
+  test "${version}" = "1.0.0" || return 1
+  test -e "${package_dir}/.build/checkouts/LocalRegistryFoo/Package.swift" || return 1
+  test ! -e "${package_dir}/.build/registry/downloads/example/registryfoo/1.0.0/Package.swift" || return 1
+
+  stop_registry_server
+  echo "identity=${identity}"
+  echo "kind=${kind}"
+  echo "version=${version}"
+  echo "checkout=present"
+  echo "registry-download=absent"
+}
+
 scenario_resolves_transitive_local_file_system_dependencies() {
   local tmp
   tmp="$(mktemp -d)"
@@ -1289,6 +1345,16 @@ Describe "swifterpm registry integration"
     The output should include "registry-download=present"
     The output should include "checkout=absent"
     The output should include "corrupt-archive-redownload=ok"
+  End
+
+  It "falls back to source control when a registry identifier has no versions"
+    When call scenario_replace_scm_with_registry_falls_back_to_scm_when_registry_has_no_versions
+    The status should be success
+    The output should include "identity=example.registryfoo"
+    The output should include "kind=localSourceControl"
+    The output should include "version=1.0.0"
+    The output should include "checkout=present"
+    The output should include "registry-download=absent"
   End
 
   It "stores manifest dump caches under .build/swifterpm"
