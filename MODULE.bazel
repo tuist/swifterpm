@@ -32,5 +32,6 @@ nio_swift_deps.from_package(
 use_repo(
     nio_swift_deps,
     "swiftpkg_swift_nio",
+    "swiftpkg_swift_package_manager",
     "swiftpkg_swift_subprocess",
 )

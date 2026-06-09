@@ -11,6 +11,7 @@ swift_library(
     deps = [
         "@swift_argument_parser//:ArgumentParser",
         "@swiftpkg_swift_subprocess//:Subprocess",
+        "@swiftpkg_swift_package_manager//:SwiftPMDataModel-auto",
         "@swiftpkg_swift_nio//:_NIOFileSystem",
     ],
     visibility = ["//visibility:public"],

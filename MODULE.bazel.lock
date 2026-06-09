@@ -657,7 +657,7 @@
         "bzlTransitiveDigest": "gKtWD1CS4Sqn+lQH91Cimr4D3cJN0MkrzkFJPkoIVMU=",
         "usagesDigest": "7VtBlef3ftG6H1Dk3qysN3ceZjUWIGzJmUi3l3LrCpQ=",
         "recordedFileInputs": {
-          "@@//third_party/nio/Package.resolved": "6cf15c3b15b6b5e8b72183ed89873a205ced4cabb392cebbaa30d3d7772e7c8b"
+          "@@//third_party/nio/Package.resolved": "244674ac22fbfedab73ff530006e40eca820343ef1648d775453e2e3fb4c52b8"
         },
         "recordedDirentsInputs": {},
         "envVariables": {},
@@ -710,6 +710,78 @@
               "target_deps": {}
             }
           },
+          "swiftpkg_swift_package_manager": {
+            "repoRuleId": "@@rules_swift_package_manager+//swiftpkg/internal:swift_package.bzl%swift_package",
+            "attributes": {
+              "bazel_package_name": "swiftpkg_swift_package_manager",
+              "commit": "e5ac741fed39ebd16df924d3dbfa904a1c332079",
+              "remote": "https://github.com/swiftlang/swift-package-manager.git",
+              "version": "",
+              "env": {},
+              "env_inherit": [],
+              "cached_json_directory": "",
+              "init_submodules": false,
+              "recursive_init_submodules": true,
+              "patch_args": [
+                "-p0"
+              ],
+              "patch_cmds": [],
+              "patch_cmds_win": [],
+              "patch_tool": "",
+              "patches": [],
+              "publicly_expose_all_targets": false,
+              "replace_scm_with_registry": false,
+              "target_deps": {}
+            }
+          },
+          "swiftpkg_swift_argument_parser": {
+            "repoRuleId": "@@rules_swift_package_manager+//swiftpkg/internal:swift_package.bzl%swift_package",
+            "attributes": {
+              "bazel_package_name": "swiftpkg_swift_argument_parser",
+              "commit": "6a52f3251125d74daf04fcbd5e6f08a75d074382",
+              "remote": "https://github.com/apple/swift-argument-parser.git",
+              "version": "1.8.2",
+              "env": {},
+              "env_inherit": [],
+              "cached_json_directory": "",
+              "init_submodules": false,
+              "recursive_init_submodules": true,
+              "patch_args": [
+                "-p0"
+              ],
+              "patch_cmds": [],
+              "patch_cmds_win": [],
+              "patch_tool": "",
+              "patches": [],
+              "publicly_expose_all_targets": false,
+              "replace_scm_with_registry": false,
+              "target_deps": {}
+            }
+          },
+          "swiftpkg_swift_asn1": {
+            "repoRuleId": "@@rules_swift_package_manager+//swiftpkg/internal:swift_package.bzl%swift_package",
+            "attributes": {
+              "bazel_package_name": "swiftpkg_swift_asn1",
+              "commit": "a9a5efd40eaf558a2bcd48d64b1d1646be686008",
+              "remote": "https://github.com/apple/swift-asn1.git",
+              "version": "1.7.1",
+              "env": {},
+              "env_inherit": [],
+              "cached_json_directory": "",
+              "init_submodules": false,
+              "recursive_init_submodules": true,
+              "patch_args": [
+                "-p0"
+              ],
+              "patch_cmds": [],
+              "patch_cmds_win": [],
+              "patch_tool": "",
+              "patches": [],
+              "publicly_expose_all_targets": false,
+              "replace_scm_with_registry": false,
+              "target_deps": {}
+            }
+          },
           "swiftpkg_swift_atomics": {
             "repoRuleId": "@@rules_swift_package_manager+//swiftpkg/internal:swift_package.bzl%swift_package",
             "attributes": {
@@ -734,13 +806,109 @@
               "target_deps": {}
             }
           },
+          "swiftpkg_swift_certificates": {
+            "repoRuleId": "@@rules_swift_package_manager+//swiftpkg/internal:swift_package.bzl%swift_package",
+            "attributes": {
+              "bazel_package_name": "swiftpkg_swift_certificates",
+              "commit": "386001a92200c70fd06217b3ccad58d7226edb84",
+              "remote": "https://github.com/apple/swift-certificates.git",
+              "version": "",
+              "env": {},
+              "env_inherit": [],
+              "cached_json_directory": "",
+              "init_submodules": false,
+              "recursive_init_submodules": true,
+              "patch_args": [
+                "-p0"
+              ],
+              "patch_cmds": [],
+              "patch_cmds_win": [],
+              "patch_tool": "",
+              "patches": [],
+              "publicly_expose_all_targets": false,
+              "replace_scm_with_registry": false,
+              "target_deps": {}
+            }
+          },
           "swiftpkg_swift_collections": {
             "repoRuleId": "@@rules_swift_package_manager+//swiftpkg/internal:swift_package.bzl%swift_package",
             "attributes": {
               "bazel_package_name": "swiftpkg_swift_collections",
-              "commit": "fea17c02d767f46b23070fdfdacc28a03a39232a",
+              "commit": "c11818f3cae0780656baa430b49e7f163f08dffd",
               "remote": "https://github.com/apple/swift-collections.git",
-              "version": "1.5.1",
+              "version": "",
+              "env": {},
+              "env_inherit": [],
+              "cached_json_directory": "",
+              "init_submodules": false,
+              "recursive_init_submodules": true,
+              "patch_args": [
+                "-p0"
+              ],
+              "patch_cmds": [],
+              "patch_cmds_win": [],
+              "patch_tool": "",
+              "patches": [],
+              "publicly_expose_all_targets": false,
+              "replace_scm_with_registry": false,
+              "target_deps": {}
+            }
+          },
+          "swiftpkg_swift_crypto": {
+            "repoRuleId": "@@rules_swift_package_manager+//swiftpkg/internal:swift_package.bzl%swift_package",
+            "attributes": {
+              "bazel_package_name": "swiftpkg_swift_crypto",
+              "commit": "d79c573e1b400d670ed12c0cb29d33f2c0f5ab70",
+              "remote": "https://github.com/apple/swift-crypto.git",
+              "version": "",
+              "env": {},
+              "env_inherit": [],
+              "cached_json_directory": "",
+              "init_submodules": false,
+              "recursive_init_submodules": true,
+              "patch_args": [
+                "-p0"
+              ],
+              "patch_cmds": [],
+              "patch_cmds_win": [],
+              "patch_tool": "",
+              "patches": [],
+              "publicly_expose_all_targets": false,
+              "replace_scm_with_registry": false,
+              "target_deps": {}
+            }
+          },
+          "swiftpkg_swift_driver": {
+            "repoRuleId": "@@rules_swift_package_manager+//swiftpkg/internal:swift_package.bzl%swift_package",
+            "attributes": {
+              "bazel_package_name": "swiftpkg_swift_driver",
+              "commit": "6dc8103a17d3ea4aface95960a2efe1d2dac26c8",
+              "remote": "https://github.com/swiftlang/swift-driver.git",
+              "version": "",
+              "env": {},
+              "env_inherit": [],
+              "cached_json_directory": "",
+              "init_submodules": false,
+              "recursive_init_submodules": true,
+              "patch_args": [
+                "-p0"
+              ],
+              "patch_cmds": [],
+              "patch_cmds_win": [],
+              "patch_tool": "",
+              "patches": [],
+              "publicly_expose_all_targets": false,
+              "replace_scm_with_registry": false,
+              "target_deps": {}
+            }
+          },
+          "swiftpkg_swift_llbuild": {
+            "repoRuleId": "@@rules_swift_package_manager+//swiftpkg/internal:swift_package.bzl%swift_package",
+            "attributes": {
+              "bazel_package_name": "swiftpkg_swift_llbuild",
+              "commit": "5b6ee1ab0f3053d66fb4114250804c3796f507da",
+              "remote": "https://github.com/swiftlang/swift-llbuild.git",
+              "version": "",
               "env": {},
               "env_inherit": [],
               "cached_json_directory": "",
@@ -762,9 +930,57 @@
             "repoRuleId": "@@rules_swift_package_manager+//swiftpkg/internal:swift_package.bzl%swift_package",
             "attributes": {
               "bazel_package_name": "swiftpkg_swift_system",
-              "commit": "7c6ad0fc39d0763e0b699210e4124afd5041c5df",
+              "commit": "61e4ca4b81b9e09e2ec863b00c340eb13497dac6",
               "remote": "https://github.com/apple/swift-system.git",
-              "version": "1.6.4",
+              "version": "",
+              "env": {},
+              "env_inherit": [],
+              "cached_json_directory": "",
+              "init_submodules": false,
+              "recursive_init_submodules": true,
+              "patch_args": [
+                "-p0"
+              ],
+              "patch_cmds": [],
+              "patch_cmds_win": [],
+              "patch_tool": "",
+              "patches": [],
+              "publicly_expose_all_targets": false,
+              "replace_scm_with_registry": false,
+              "target_deps": {}
+            }
+          },
+          "swiftpkg_swift_toolchain_sqlite": {
+            "repoRuleId": "@@rules_swift_package_manager+//swiftpkg/internal:swift_package.bzl%swift_package",
+            "attributes": {
+              "bazel_package_name": "swiftpkg_swift_toolchain_sqlite",
+              "commit": "b45b80b943e88db3cb8ddea798fa3fa9912375ff",
+              "remote": "https://github.com/swiftlang/swift-toolchain-sqlite.git",
+              "version": "",
+              "env": {},
+              "env_inherit": [],
+              "cached_json_directory": "",
+              "init_submodules": false,
+              "recursive_init_submodules": true,
+              "patch_args": [
+                "-p0"
+              ],
+              "patch_cmds": [],
+              "patch_cmds_win": [],
+              "patch_tool": "",
+              "patches": [],
+              "publicly_expose_all_targets": false,
+              "replace_scm_with_registry": false,
+              "target_deps": {}
+            }
+          },
+          "swiftpkg_swift_tools_support_core": {
+            "repoRuleId": "@@rules_swift_package_manager+//swiftpkg/internal:swift_package.bzl%swift_package",
+            "attributes": {
+              "bazel_package_name": "swiftpkg_swift_tools_support_core",
+              "commit": "ecd55b905ccd2c45c74fd02931e7188c8c41ebf3",
+              "remote": "https://github.com/swiftlang/swift-tools-support-core.git",
+              "version": "",
               "env": {},
               "env_inherit": [],
               "cached_json_directory": "",
@@ -786,7 +1002,8 @@
         "moduleExtensionMetadata": {
           "explicitRootModuleDirectDeps": [
             "swiftpkg_swift_nio",
-            "swiftpkg_swift_subprocess"
+            "swiftpkg_swift_subprocess",
+            "swiftpkg_swift_package_manager"
           ],
           "explicitRootModuleDirectDevDeps": [],
           "useAllRepos": "NO",
