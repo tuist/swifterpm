@@ -23,7 +23,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/identifiers":
+            source_url = urllib.parse.parse_qs(parsed.query).get("url", [""])[0].lower()
+            if "proto" in source_url:
+                self.send_json({"identifiers": ["apple.swift-protobuf"]})
+                return
+            if "service" in source_url:
+                self.send_json({"identifiers": ["grpc.grpc-swift-protobuf"]})
+                return
             self.send_json({"identifiers": ["example.registryfoo"]})
+            return
+        if parsed.path == "/apple/swift-protobuf":
+            self.send_json({"releases": {}})
+            return
+        if parsed.path == "/grpc/grpc-swift-protobuf":
+            self.send_json({"releases": {}})
             return
         if parsed.path == "/example/registryfoo":
             if (registry_dir / "no-releases").exists():

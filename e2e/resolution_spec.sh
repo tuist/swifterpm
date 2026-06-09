@@ -1184,6 +1184,67 @@ scenario_replace_scm_with_registry_falls_back_to_scm_when_registry_has_no_versio
   echo "registry-download=absent"
 }
 
+scenario_replace_scm_with_registry_skips_directly_incompatible_candidate() {
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'stop_registry_server; rm -rf "${tmp}"' RETURN
+  prepare_isolated_state "${tmp}"
+
+  local registry_dir="${tmp}/registry"
+  mkdir -p "${registry_dir}"
+  start_registry_server "${tmp}" "${registry_dir}" || return 1
+  local registry_url="http://127.0.0.1:${REGISTRY_SERVER_PORT}"
+
+  local fixture_dir
+  fixture_dir="$(copy_swifterpm_fixture "GreedyLookahead" "${tmp}")" || return 1
+
+  local proto_dir="${fixture_dir}/Proto"
+  init_git_package "${tmp}" "${proto_dir}" || return 1
+  tag_git_package "${tmp}" "${proto_dir}" "1.35.1" "1.38.0" || return 1
+  scoped_env "${tmp}" git clone --bare "${proto_dir}" "${fixture_dir}/Proto.git" >/dev/null 2>&1 || return 1
+
+  local service_dir="${fixture_dir}/Service"
+  init_git_package "${tmp}" "${service_dir}" || return 1
+  tag_git_package "${tmp}" "${service_dir}" "2.3.0" || return 1
+  cp "${fixture_dir}/ServiceIncompatible/Package.swift" "${service_dir}/Package.swift"
+  scoped_env "${tmp}" git -C "${service_dir}" add Package.swift
+  scoped_env "${tmp}" git -C "${service_dir}" commit -m "Raise proto lower bound" >/dev/null
+  tag_git_package "${tmp}" "${service_dir}" "2.4.0" || return 1
+  scoped_env "${tmp}" git clone --bare "${service_dir}" "${fixture_dir}/Service.git" >/dev/null 2>&1 || return 1
+
+  local package_dir="${fixture_dir}/App"
+  scoped_env "${tmp}" swift package --package-path "${package_dir}" resolve >/dev/null 2>&1 || return 1
+  local swiftpm_service_version
+  swiftpm_service_version="$(pin_state_value "${package_dir}" "service" "version")"
+  test "${swiftpm_service_version}" = "2.3.0" || return 1
+
+  rm -rf "${package_dir}/.build" "${package_dir}/Package.resolved"
+
+  scoped_env "${tmp}" "${SWIFTERPM_BIN}" \
+    --package-path "${package_dir}" \
+    --scratch-path "${package_dir}/.build" \
+    --cache-path "${tmp}/cache" \
+    --default-registry-url "${registry_url}" \
+    --replace-scm-with-registry \
+    --disable-package-info-cache \
+    --quiet \
+    resolve >/dev/null
+
+  local swifterpm_service_version
+  swifterpm_service_version="$(
+    pin_state_value "${package_dir}" "grpc.grpc-swift-protobuf" "version"
+  )"
+  local proto_version
+  proto_version="$(pin_state_value "${package_dir}" "apple.swift-protobuf" "version")"
+  test "${swifterpm_service_version}" = "${swiftpm_service_version}" || return 1
+  test "${proto_version}" = "1.35.1" || return 1
+
+  stop_registry_server
+  echo "swiftpm-service-version=${swiftpm_service_version}"
+  echo "swifterpm-service-version=${swifterpm_service_version}"
+  echo "proto-version=${proto_version}"
+}
+
 scenario_resolves_transitive_local_file_system_dependencies() {
   local tmp
   tmp="$(mktemp -d)"
@@ -1355,6 +1416,14 @@ Describe "swifterpm registry integration"
     The output should include "version=1.0.0"
     The output should include "checkout=present"
     The output should include "registry-download=absent"
+  End
+
+  It "matches SwiftPM when the newest candidate has an incompatible direct dependency"
+    When call scenario_replace_scm_with_registry_skips_directly_incompatible_candidate
+    The status should be success
+    The output should include "swiftpm-service-version=2.3.0"
+    The output should include "swifterpm-service-version=2.3.0"
+    The output should include "proto-version=1.35.1"
   End
 
   It "stores manifest dump caches under .build/swifterpm"
