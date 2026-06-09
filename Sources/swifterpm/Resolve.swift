@@ -70,7 +70,6 @@ enum PackageResolver {
 
         var fixedPins: [ResolvedPin] = []
         var rootDependencies: [(PackageKey, VersionRange)] = []
-        var rootDirectPackages = Set<PackageKey>()
         progress?.started(
             rootVersionedDependencies: dependencies.filter {
                 ManifestParser.versionRange(for: $0.requirement) != nil
@@ -83,7 +82,6 @@ enum PackageResolver {
         for dependency in dependencies {
             if let range = ManifestParser.versionRange(for: dependency.requirement) {
                 let package = PackageKey.fromDependency(dependency)
-                rootDirectPackages.insert(package)
                 rootDependencies.append((package, range))
             } else {
                 progress?.startedResolvingFixedPin(package: dependency.identity)
@@ -97,7 +95,6 @@ enum PackageResolver {
             cache: cache,
             registryConfig: registryConfig,
             disableSandbox: disableSandbox,
-            rootDirectPackages: rootDirectPackages,
             scmToRegistryTransformation: scmToRegistryTransformation,
             progress: progress
         )
@@ -118,7 +115,6 @@ enum PackageResolver {
         let cache: Cache
         let registryConfig: RegistryConfig
         let disableSandbox: Bool
-        let rootDirectPackages: Set<PackageKey>
         let scmToRegistryTransformation: SCMToRegistryTransformation
         let progress: ResolutionProgressReporter?
 
@@ -128,14 +124,12 @@ enum PackageResolver {
 
         init(
             cache: Cache, registryConfig: RegistryConfig, disableSandbox: Bool,
-            rootDirectPackages: Set<PackageKey>,
             scmToRegistryTransformation: SCMToRegistryTransformation,
             progress: ResolutionProgressReporter?
         ) {
             self.cache = cache
             self.registryConfig = registryConfig
             self.disableSandbox = disableSandbox
-            self.rootDirectPackages = rootDirectPackages
             self.scmToRegistryTransformation = scmToRegistryTransformation
             self.progress = progress
             versions[.root] = [
@@ -287,10 +281,7 @@ enum PackageResolver {
             let source = try await manifestSource(package: package, version: version)
             let manifest = try await ManifestLoader.dumpPackage(
                 packageDir: source, disableSandbox: disableSandbox)
-            let rawManifestDependencies =
-                rootDirectPackages.contains(package)
-                ? try ManifestParser.dependencies(manifest)
-                : try ManifestParser.requiredDependencies(manifest)
+            let rawManifestDependencies = try ManifestParser.requiredDependencies(manifest)
             let manifestDependencies = try await PackageResolver.transformedDependencies(
                 rawManifestDependencies,
                 registryConfig: registryConfig,

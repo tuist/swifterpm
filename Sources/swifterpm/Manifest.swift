@@ -246,12 +246,6 @@ enum ManifestParser {
                 }
             }
         }
-        for target in targets where target["type"] as? String == "test" {
-            if let name = target["name"] as? String {
-                pendingTargets.append(name)
-            }
-        }
-
         var references = Set<String>()
         var visitedTargets = Set<String>()
 

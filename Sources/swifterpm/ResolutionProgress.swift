@@ -146,15 +146,7 @@ final class ResolutionProgressReporter: @unchecked Sendable {
             count = paddedCount(resolvedPackages, total: resolvedPackages)
         }
         return
-            "\(progressBar(resolved: resolvedPackages, total: targetPackages)) \(TerminalStyle.bold(count)) \(TerminalStyle.dim("pkgs")) \(TerminalStyle.dim("·")) \(TerminalStyle.cyan("resolving"))"
-    }
-
-    private static func progressBar(resolved: Int, total: Int) -> String {
-        let width = 15
-        let progress = total > 0 ? Double(resolved) / Double(total) : 0
-        let filled = min(width, max(0, Int((progress * Double(width)).rounded())))
-        return TerminalStyle.cyan(String(repeating: "█", count: filled))
-            + TerminalStyle.dim(String(repeating: "░", count: width - filled))
+            "\(TerminalStyle.bold(count)) \(TerminalStyle.dim("pkgs")) \(TerminalStyle.dim("·")) \(TerminalStyle.cyan("resolving"))"
     }
 
     private static func paddedCount(_ count: Int, total: Int) -> String {
