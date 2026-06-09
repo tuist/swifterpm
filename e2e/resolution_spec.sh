@@ -971,6 +971,39 @@ scenario_resolves_swiftpm_external_simple() {
   echo "force-resolve=ok"
 }
 
+scenario_restore_copies_checkouts_on_ci() {
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "${tmp}"' RETURN
+  prepare_isolated_state "${tmp}"
+
+  local fixture_dir
+  fixture_dir="$(copy_swiftpm_fixture "Simple" "${tmp}")" || return 1
+
+  init_git_package "${tmp}" "${fixture_dir}/Foo" || return 1
+  tag_git_package "${tmp}" "${fixture_dir}/Foo" "1.0.0" "1.1.0" "1.2.0" "1.2.3" || return 1
+
+  local package_dir="${fixture_dir}/Bar"
+  resolve_package "${tmp}" "${package_dir}" "${tmp}/cache" >/dev/null || return 1
+  rm -rf "${package_dir}/.build"
+
+  scoped_env "${tmp}" env CI=1 "${SWIFTERPM_BIN}" \
+    --package-path "${package_dir}" \
+    --scratch-path "${package_dir}/.build" \
+    --cache-path "${tmp}/cache" \
+    --disable-package-info-cache \
+    --quiet \
+    restore >/dev/null || return 1
+
+  local checkout="${package_dir}/.build/checkouts/Foo"
+  test -d "${checkout}" || return 1
+  test ! -L "${checkout}" || return 1
+  test -f "${checkout}/Package.swift" || return 1
+
+  echo "checkout=directory"
+  echo "checkout-symlink=absent"
+}
+
 scenario_resolves_swiftpm_external_complex() {
   local tmp
   tmp="$(mktemp -d)"
@@ -1200,6 +1233,13 @@ Describe "swifterpm resolve against SwiftPM dependency graph fixtures"
     The output should include "package-resolved=match"
     The output should include "workspace-state=match"
     The output should include "force-resolve=ok"
+  End
+
+  It "copies restored source checkouts instead of symlinking them on CI"
+    When call scenario_restore_copies_checkouts_on_ci
+    The status should be success
+    The output should include "checkout=directory"
+    The output should include "checkout-symlink=absent"
   End
 
   It "matches SwiftPM's external complex transitive graph scenario"

@@ -74,6 +74,48 @@ struct SupportTests {
     }
 
     @Test
+    func cachedDirectoryReplacementCopiesOnCI() async throws {
+        try await Environment.$values.withValue(["CI": "1"]) {
+            try await withTemporaryDirectory { root in
+                let source = root.appendingPathComponent("source")
+                let nested = source.appendingPathComponent("nested")
+                let destination = root.appendingPathComponent("destination")
+                try await AsyncFileSystem.createDirectory(
+                    at: nested, withIntermediateDirectories: true)
+                try await AsyncFileSystem.atomicWrite(
+                    "value", to: nested.appendingPathComponent("file.txt"))
+
+                try await AsyncFileSystem.replaceWithCachedDirectory(
+                    source: source, destination: destination)
+
+                #expect(try await AsyncFileSystem.isDirectoryAndNotSymlink(destination))
+                #expect(
+                    try await AsyncFileSystem.exists(
+                        destination.appendingPathComponent("nested/file.txt")))
+                let data = try await AsyncFileSystem.readData(
+                    from: destination.appendingPathComponent("nested/file.txt"))
+                #expect(String(data: data, encoding: .utf8) == "value")
+            }
+        }
+    }
+
+    @Test
+    func ciDetectionMatchesAubeEnvironmentLogic() async throws {
+        Environment.$values.withValue([:]) {
+            #expect(!Environment.isCI)
+        }
+        Environment.$values.withValue(["CI": ""]) {
+            #expect(Environment.isCI)
+        }
+        Environment.$values.withValue(["GITHUB_RUN_ID": "123"]) {
+            #expect(Environment.isCI)
+        }
+        Environment.$values.withValue(["BUILD_NUMBER": "123"]) {
+            #expect(Environment.isCI)
+        }
+    }
+
+    @Test
     func temporaryDirectoryAndFileSafeNameUseScopedPaths() async throws {
         try await withTemporaryDirectory { root in
             let temp = try await AsyncFileSystem.temporaryDirectory(in: root)

@@ -276,13 +276,21 @@ extension AsyncFileSystem {
         try await removeItem(at: url)
     }
 
-    static func replaceWithSymlinkedDirectory(source: URL, destination: URL) async throws {
+    static func replaceWithCachedDirectory(source: URL, destination: URL) async throws {
         if try await exists(destination) {
             try await removePath(destination)
         }
         try await createDirectory(
             at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if Environment.isCI {
+            try await copyItem(at: source, to: destination)
+            return
+        }
         try await createSymbolicLink(at: destination, withDestinationURL: source)
+    }
+
+    static func replaceWithSymlinkedDirectory(source: URL, destination: URL) async throws {
+        try await replaceWithCachedDirectory(source: source, destination: destination)
     }
 
     static func flattenSingleDirectory(_ url: URL) async throws {

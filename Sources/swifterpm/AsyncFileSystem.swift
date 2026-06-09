@@ -91,6 +91,14 @@ enum AsyncFileSystem {
         )
     }
 
+    static func copyItem(at source: URL, to destination: URL) async throws {
+        try await fileSystem.copyItem(
+            at: filePath(source),
+            to: filePath(destination),
+            strategy: .parallel(maxDescriptors: 16)
+        )
+    }
+
     static func contentsOfDirectory(at url: URL) async throws -> [URL] {
         try await fileSystem.withDirectoryHandle(atPath: filePath(url)) { directory in
             var entries: [URL] = []
