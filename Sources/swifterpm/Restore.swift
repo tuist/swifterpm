@@ -188,10 +188,17 @@ enum WorkspaceRestorer {
             url: url,
             checksum: checksum
         )
-        if try await !AsyncFileSystem.exists(archivePath) {
+        if try await !validCachedBinaryArtifactArchive(
+            archivePath,
+            expectedChecksum: checksum
+        ) {
             let lock = try await cache.lock(namespace: "artifact-archives", key: archivePath.path)
             _ = lock
-            if try await !AsyncFileSystem.exists(archivePath) {
+            if try await !validCachedBinaryArtifactArchive(
+                archivePath,
+                expectedChecksum: checksum
+            ) {
+                try? await AsyncFileSystem.removePath(archivePath)
                 let remoteURL = try artifactURL(url)
                 try await HTTPClient.download(
                     url: remoteURL,
@@ -202,7 +209,7 @@ enum WorkspaceRestorer {
         }
 
         let actualChecksum = try Hashing.sha256Hex(fileAt: archivePath)
-        guard actualChecksum == checksum else {
+        guard actualChecksum.caseInsensitiveCompare(checksum) == .orderedSame else {
             try? await AsyncFileSystem.removePath(archivePath)
             throw ToolError.message(
                 "\(targetName) checksum mismatch: expected \(checksum), got \(actualChecksum)"
@@ -213,6 +220,21 @@ enum WorkspaceRestorer {
             archivePath: archivePath,
             destination: destination
         )
+    }
+
+    private static func validCachedBinaryArtifactArchive(
+        _ archivePath: URL,
+        expectedChecksum: String
+    ) async throws -> Bool {
+        guard try await AsyncFileSystem.exists(archivePath) else {
+            return false
+        }
+        let actualChecksum = try Hashing.sha256Hex(fileAt: archivePath)
+        if actualChecksum.caseInsensitiveCompare(expectedChecksum) == .orderedSame {
+            return true
+        }
+        try? await AsyncFileSystem.removePath(archivePath)
+        return false
     }
 
     private static func extractBinaryArtifactArchive(

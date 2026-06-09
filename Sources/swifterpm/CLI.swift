@@ -1,7 +1,7 @@
 import ArgumentParser
 import Foundation
 
-public let swifterpmVersion = "0.7.0"
+public let swifterpmVersion = "0.8.1"
 
 struct CLIPath: Equatable, Sendable {
     let rawValue: String
