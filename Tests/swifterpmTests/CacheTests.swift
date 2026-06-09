@@ -118,4 +118,50 @@ struct CacheTests {
                     ))
         }
     }
+
+    @Test
+    func generatedCachePathsSanitizeMetadataComponents() async throws {
+        try await withTemporaryDirectory { root in
+            let cache = try await Cache(root: root)
+            let pin = ResolvedPin(
+                identity: "bad/identity",
+                kind: "remoteSourceControl",
+                location: "https://github.com/example/foo.git",
+                state: ResolvedState(
+                    branch: "feature/path\nwith-control",
+                    revision: "abcdef1234567890",
+                    version: nil
+                )
+            )
+
+            let sourcePath = try cache.sourcePath(pin: pin).path
+            let registrySourcePath = cache.registrySourcePath(
+                identity: "example.bad/package",
+                version: "1.2.3\nbeta",
+                registryURL: "https://registry.example.com",
+                checksum: "abcdef1234567890"
+            ).path
+            let registryArchivePath = cache.registryArchivePath(
+                identity: "example.bad/package",
+                version: "1.2.3\nbeta",
+                registryURL: "https://registry.example.com",
+                checksum: "abcdef1234567890"
+            ).path
+            let artifactPath = cache.binaryArtifactDirectory(
+                identity: "bad/identity",
+                targetName: "Foo\nBar",
+                checksum: "abcdef1234567890"
+            ).path
+
+            #expect(sourcePath.contains("bad_identity/feature_path_with-control-abcdef12"))
+            #expect(registrySourcePath.contains("example.bad_package/1.2.3_beta-"))
+            #expect(registryArchivePath.contains("-1.2.3_beta-"))
+            #expect(registryArchivePath.hasSuffix("-abcdef1234567890.zip"))
+            #expect(artifactPath.contains("bad_identity/Foo_Bar-abcdef123456"))
+            for path in [sourcePath, registrySourcePath, registryArchivePath, artifactPath] {
+                #expect(!path.contains("\n"))
+                #expect(!path.contains("//"))
+            }
+        }
+    }
 }

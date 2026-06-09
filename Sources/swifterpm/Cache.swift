@@ -46,8 +46,9 @@ struct Cache: Sendable {
         return
             try root
                 .appendingPathComponent("sources")
-                .appendingPathComponent(pin.identity)
-                .appendingPathComponent("\(version)-\(Hashing.shortRevision(pin.revision()))")
+                .appendingPathComponent(SafePathComponent.make(pin.identity))
+                .appendingPathComponent(
+                    SafePathComponent.make("\(version)-\(Hashing.shortRevision(pin.revision()))"))
     }
 
     func archivePath(url: String, revision: String) -> URL {
@@ -65,14 +66,14 @@ struct Cache: Sendable {
     ) -> URL {
         root
             .appendingPathComponent("sources")
-            .appendingPathComponent(identity)
+            .appendingPathComponent(SafePathComponent.make(identity))
             .appendingPathComponent(
-                [
+                SafePathComponent.make([
                     version,
                     String(Hashing.stable(registryURL).prefix(12)),
                     checksum,
                     "registry",
-                ].joined(separator: "-")
+                ].joined(separator: "-"))
             )
     }
 
@@ -85,12 +86,12 @@ struct Cache: Sendable {
         root
             .appendingPathComponent("registry/archives")
             .appendingPathComponent(
-                [
+                SafePathComponent.make([
                     Hashing.stable(identity),
                     version,
                     String(Hashing.stable(registryURL).prefix(12)),
                     checksum,
-                ].joined(separator: "-") + ".zip"
+                ].joined(separator: "-") + ".zip")
             )
     }
 
@@ -104,8 +105,9 @@ struct Cache: Sendable {
     func binaryArtifactDirectory(identity: String, targetName: String, checksum: String) -> URL {
         root
             .appendingPathComponent("artifacts")
-            .appendingPathComponent(identity)
-            .appendingPathComponent("\(targetName)-\(String(checksum.prefix(12)))")
+            .appendingPathComponent(SafePathComponent.make(identity))
+            .appendingPathComponent(
+                SafePathComponent.make("\(targetName)-\(String(checksum.prefix(12)))"))
     }
 
     func remoteVersionsPath(location: String) -> URL {
