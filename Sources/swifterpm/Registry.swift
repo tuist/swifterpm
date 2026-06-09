@@ -1,8 +1,12 @@
 import Foundation
+#if canImport(Security)
+    import Security
+#endif
 
 struct RegistryConfig: Sendable {
     private var defaultRegistryURL: URL?
     private var scopedRegistryURLs: [String: URL] = [:]
+    private var registryAuthentication: [String: RegistryAuthenticationType] = [:]
 
     static func load(packageDir: URL, configPath: URL?, defaultRegistryURL: String?) async throws
         -> RegistryConfig
@@ -59,6 +63,17 @@ struct RegistryConfig: Sendable {
                 scopedRegistryURLs[scope.lowercased()] = url
             }
         }
+        if let authentication = root["authentication"] as? [String: Any] {
+            for (registry, value) in authentication {
+                guard let entry = value as? [String: Any],
+                      let typeString = entry["type"] as? String,
+                      let type = RegistryAuthenticationType(rawValue: typeString)
+                else {
+                    continue
+                }
+                registryAuthentication[registry.lowercased()] = type
+            }
+        }
     }
 
     private static func parseRegistryURL(_ url: String) throws -> URL {
@@ -83,6 +98,275 @@ struct RegistryConfig: Sendable {
                 ".swiftpm/configuration/registries.json")
         }
     }
+
+    fileprivate func authenticationType(for registryURL: URL) -> RegistryAuthenticationType? {
+        guard let host = registryURL.host?.lowercased() else { return nil }
+        let key = [host, registryURL.port.map(String.init)].compactMap { $0 }.joined(separator: ":")
+        return registryAuthentication[key]
+    }
+}
+
+private enum RegistryAuthenticationType: String, Sendable {
+    case basic
+    case token
+}
+
+struct RegistryCredential: Sendable {
+    let user: String
+    let password: String
+}
+
+enum RegistryAuthorization {
+    static func header(for url: URL, registryConfig: RegistryConfig) async -> String? {
+        if let token = nonEmpty(ProcessInfo.processInfo.environment["SWIFTPM_REGISTRY_TOKEN"]) {
+            return bearerHeader(token)
+        }
+
+        let environment = ProcessInfo.processInfo.environment
+        if let login = nonEmpty(environment["SWIFTPM_REGISTRY_LOGIN"]),
+           let password = nonEmpty(environment["SWIFTPM_REGISTRY_PASSWORD"])
+        {
+            return header(
+                for: RegistryCredential(user: login, password: password),
+                url: url,
+                registryConfig: registryConfig
+            )
+        }
+
+        if let netrcData = nonEmpty(environment["SWIFTPM_NETRC_DATA"]),
+           let credential = RegistryNetrc(content: netrcData).credential(for: url)
+        {
+            return header(for: credential, url: url, registryConfig: registryConfig)
+        }
+
+        if let credential = await RegistryKeychain.credential(for: url) {
+            return header(for: credential, url: url, registryConfig: registryConfig)
+        }
+
+        if let home = environment["HOME"] {
+            let netrcPath = URL(fileURLWithPath: home).appendingPathComponent(".netrc")
+            if let data = try? await AsyncFileSystem.readData(from: netrcPath),
+               let content = String(data: data, encoding: .utf8),
+               let credential = RegistryNetrc(content: content).credential(for: url)
+            {
+                return header(for: credential, url: url, registryConfig: registryConfig)
+            }
+        }
+
+        return nil
+    }
+
+    static func header(
+        for credential: RegistryCredential,
+        url: URL,
+        registryConfig: RegistryConfig
+    ) -> String {
+        switch registryConfig.authenticationType(for: url) {
+        case .basic:
+            return basicHeader(credential)
+        case .token:
+            return bearerHeader(credential.password)
+        case nil:
+            if credential.user == "token" {
+                return bearerHeader(credential.password)
+            }
+            return basicHeader(credential)
+        }
+    }
+
+    private static func basicHeader(_ credential: RegistryCredential) -> String {
+        let token = Data("\(credential.user):\(credential.password)".utf8).base64EncodedString()
+        return "Basic \(token)"
+    }
+
+    private static func bearerHeader(_ token: String) -> String {
+        "Bearer \(token)"
+    }
+
+    private static func nonEmpty(_ value: String?) -> String? {
+        guard let value, !value.isEmpty else { return nil }
+        return value
+    }
+}
+
+struct RegistryNetrc {
+    private let machines: [Machine]
+
+    init(content: String) {
+        machines = Self.parse(content: content)
+    }
+
+    func credential(for url: URL) -> RegistryCredential? {
+        guard let host = url.host?.lowercased() else { return nil }
+        let machine = machines.last(where: { $0.name == host }) ?? machines.first(where: \.isDefault)
+        return machine.map { RegistryCredential(user: $0.login, password: $0.password) }
+    }
+
+    private static func parse(content: String) -> [Machine] {
+        var tokens = tokenize(content)
+        var machines: [Machine] = []
+        while let token = tokens.first {
+            switch token {
+            case "machine":
+                tokens.removeFirst()
+                guard let name = tokens.popFirst() else { continue }
+                if let machine = parseMachine(name: name.lowercased(), tokens: &tokens) {
+                    machines.append(machine)
+                }
+            case "default":
+                tokens.removeFirst()
+                if let machine = parseMachine(name: "default", tokens: &tokens) {
+                    machines.append(machine)
+                }
+            default:
+                tokens.removeFirst()
+            }
+        }
+        return machines
+    }
+
+    private static func parseMachine(name: String, tokens: inout [String]) -> Machine? {
+        var login: String?
+        var password: String?
+        while let key = tokens.first {
+            if key == "machine" || key == "default" { break }
+            tokens.removeFirst()
+            switch key {
+            case "login":
+                login = tokens.popFirst()
+            case "password":
+                password = tokens.popFirst()
+            default:
+                _ = tokens.popFirst()
+            }
+            if login != nil, password != nil {
+                while let key = tokens.first, key != "machine", key != "default" {
+                    tokens.removeFirst()
+                }
+                break
+            }
+        }
+        guard let login, let password else { return nil }
+        return Machine(name: name, login: login, password: password)
+    }
+
+    private static func tokenize(_ content: String) -> [String] {
+        var tokens: [String] = []
+        var token = ""
+        var inQuote = false
+        var skippingComment = false
+
+        for character in content {
+            if skippingComment {
+                if character == "\n" {
+                    skippingComment = false
+                }
+                continue
+            }
+            if !inQuote, character == "#" {
+                if !token.isEmpty {
+                    tokens.append(token)
+                    token = ""
+                }
+                skippingComment = true
+                continue
+            }
+            if character == "\"" {
+                inQuote.toggle()
+                continue
+            }
+            if !inQuote, character.isWhitespace {
+                if !token.isEmpty {
+                    tokens.append(token)
+                    token = ""
+                }
+                continue
+            }
+            token.append(character)
+        }
+        if !token.isEmpty {
+            tokens.append(token)
+        }
+        return tokens
+    }
+
+    private struct Machine {
+        let name: String
+        let login: String
+        let password: String
+
+        var isDefault: Bool { name == "default" }
+    }
+}
+
+private enum RegistryKeychain {
+    static func credential(for url: URL) async -> RegistryCredential? {
+        #if canImport(Security)
+            guard let searchQuery = query(for: url, includeData: false) else { return nil }
+            var items: CFTypeRef?
+            let status = SecItemCopyMatching(searchQuery as CFDictionary, &items)
+            guard status == errSecSuccess, let existingItems = items as? [[String: Any]] else {
+                return nil
+            }
+            let sortedItems = existingItems.sorted {
+                switch (
+                    $0[kSecAttrModificationDate as String] as? Date,
+                    $1[kSecAttrModificationDate as String] as? Date
+                ) {
+                case (nil, nil):
+                    return false
+                case (_, nil):
+                    return true
+                case (nil, _):
+                    return false
+                case (.some(let left), .some(let right)):
+                    return left < right
+                }
+            }
+            guard let item = sortedItems.last,
+                  let created = item[kSecAttrCreationDate as String] as? Date,
+                  var detailQuery = query(for: url, includeData: true)
+            else {
+                return nil
+            }
+            detailQuery[kSecAttrCreationDate as String] = created
+            if let modified = item[kSecAttrModificationDate as String] as? Date {
+                detailQuery[kSecAttrModificationDate as String] = modified
+            }
+
+            var detail: CFTypeRef?
+            guard SecItemCopyMatching(detailQuery as CFDictionary, &detail) == errSecSuccess,
+                  let credential = detail as? [String: Any],
+                  let account = credential[kSecAttrAccount as String] as? String,
+                  let passwordData = credential[kSecValueData as String] as? Data
+            else {
+                return nil
+            }
+            return RegistryCredential(user: account, password: String(decoding: passwordData, as: UTF8.self))
+        #else
+            return nil
+        #endif
+    }
+
+    #if canImport(Security)
+        private static func query(for url: URL, includeData: Bool) -> [String: Any]? {
+            guard let host = url.host?.lowercased(), !host.isEmpty else { return nil }
+            var query: [String: Any] = [
+                kSecClass as String: kSecClassInternetPassword,
+                kSecAttrProtocol as String: url.scheme == "http" ? kSecAttrProtocolHTTP : kSecAttrProtocolHTTPS,
+                kSecAttrServer as String: host,
+                kSecMatchLimit as String: includeData ? kSecMatchLimitOne : kSecMatchLimitAll,
+                kSecReturnAttributes as String: true,
+            ]
+            if includeData {
+                query[kSecReturnData as String] = true
+            }
+            if let port = url.port {
+                query[kSecAttrPort as String] = port
+            }
+            return query
+        }
+    #endif
 }
 
 struct RegistrySourceArchive: Sendable {
@@ -122,7 +406,11 @@ enum RegistryClient {
                     registryURL: registryURL,
                     sourceControlURL: sourceControlURL
                 ),
-                headers: ["Accept": "application/vnd.swift.registry.v1+json"]
+                headers: await headers(
+                    accept: "application/vnd.swift.registry.v1+json",
+                    registryURL: registryURL,
+                    registryConfig: registryConfig
+                )
             )
             return try JSONDecoder().decode(IdentifiersResponse.self, from: data).identifiers
         } catch ToolError.message(let message) where message.hasPrefix("HTTP 404 ") {
@@ -148,7 +436,8 @@ enum RegistryClient {
         {
             return cached
         }
-        let versions = try await fetchRegistryVersions(registryURL: registryURL, identity: identity)
+        let versions = try await fetchRegistryVersions(
+            registryURL: registryURL, identity: identity, registryConfig: registryConfig)
         try await writeCachedRegistryVersions(
             cache: cache, registryURL: registryURL.absoluteString, identity: identity,
             versions: versions)
@@ -166,13 +455,15 @@ enum RegistryClient {
             checksum: try await fetchSourceArchiveChecksum(
                 registryURL: registryURL,
                 identity: identity,
-                version: version
+                version: version,
+                registryConfig: registryConfig
             )
         )
     }
 
     static func downloadArchive(
         cache: Cache,
+        registryConfig: RegistryConfig,
         registryURL: URL,
         identity: String,
         version: String,
@@ -191,7 +482,11 @@ enum RegistryClient {
             if try await !validCachedArchive(archivePath, expectedChecksum: expectedChecksum) {
                 try? await AsyncFileSystem.removePath(archivePath)
                 let data = try await fetchRegistryArchive(
-                    registryURL: registryURL, identity: identity, version: version)
+                    registryURL: registryURL,
+                    identity: identity,
+                    version: version,
+                    registryConfig: registryConfig
+                )
                 let actual = Hashing.sha256Hex(data)
                 guard actual.caseInsensitiveCompare(expectedChecksum) == .orderedSame else {
                     throw ToolError.message(
@@ -221,7 +516,11 @@ enum RegistryClient {
         return false
     }
 
-    private static func fetchRegistryVersions(registryURL: URL, identity: String) async throws
+    private static func fetchRegistryVersions(
+        registryURL: URL,
+        identity: String,
+        registryConfig: RegistryConfig
+    ) async throws
         -> [RegistryVersion]
     {
         struct ReleasesResponse: Decodable {
@@ -230,7 +529,11 @@ enum RegistryClient {
         }
         let data = try await HTTPClient.data(
             url: try packageURL(registryURL: registryURL, identity: identity),
-            headers: ["Accept": "application/vnd.swift.registry.v1+json"])
+            headers: await headers(
+                accept: "application/vnd.swift.registry.v1+json",
+                registryURL: registryURL,
+                registryConfig: registryConfig
+            ))
         let response = try JSONDecoder().decode(ReleasesResponse.self, from: data)
         return response.releases.compactMap { version, release in
             guard release.problem == nil, let semver = try? SemVer(version) else { return nil }
@@ -242,7 +545,10 @@ enum RegistryClient {
     }
 
     private static func fetchSourceArchiveChecksum(
-        registryURL: URL, identity: String, version: String
+        registryURL: URL,
+        identity: String,
+        version: String,
+        registryConfig: RegistryConfig
     ) async throws -> String {
         struct ReleaseInfo: Decodable {
             struct Resource: Decodable {
@@ -254,7 +560,11 @@ enum RegistryClient {
         }
         let data = try await HTTPClient.data(
             url: try packageURL(registryURL: registryURL, identity: identity, version: version),
-            headers: ["Accept": "application/vnd.swift.registry.v1+json"])
+            headers: await headers(
+                accept: "application/vnd.swift.registry.v1+json",
+                registryURL: registryURL,
+                registryConfig: registryConfig
+            ))
         let info = try JSONDecoder().decode(ReleaseInfo.self, from: data)
         guard
             let resource = info.resources.first(where: {
@@ -267,13 +577,37 @@ enum RegistryClient {
         return resource.checksum
     }
 
-    private static func fetchRegistryArchive(registryURL: URL, identity: String, version: String)
+    private static func fetchRegistryArchive(
+        registryURL: URL,
+        identity: String,
+        version: String,
+        registryConfig: RegistryConfig
+    )
         async throws -> Data
     {
         let (scope, name) = try PinKind.registryIdentityParts(identity)
         let url = registryURL.appendingPathComponents([scope, name, "\(version).zip"])
         return try await HTTPClient.data(
-            url: url, headers: ["Accept": "application/vnd.swift.registry.v1+zip"])
+            url: url,
+            headers: await headers(
+                accept: "application/vnd.swift.registry.v1+zip",
+                registryURL: registryURL,
+                registryConfig: registryConfig
+            ))
+    }
+
+    private static func headers(
+        accept: String,
+        registryURL: URL,
+        registryConfig: RegistryConfig
+    ) async -> [String: String] {
+        var headers = ["Accept": accept]
+        if let authorization = await RegistryAuthorization.header(
+            for: registryURL, registryConfig: registryConfig)
+        {
+            headers["Authorization"] = authorization
+        }
+        return headers
     }
 
     private static func packageURL(registryURL: URL, identity: String, version: String? = nil)
@@ -328,6 +662,12 @@ enum RegistryClient {
             + Data("\n".utf8)
         try await AsyncFileSystem.atomicWrite(
             data, to: cache.registryVersionsPath(registryURL: registryURL, identity: identity))
+    }
+}
+
+private extension Array where Element == String {
+    mutating func popFirst() -> String? {
+        isEmpty ? nil : removeFirst()
     }
 }
 

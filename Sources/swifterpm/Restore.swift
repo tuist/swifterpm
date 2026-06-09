@@ -598,6 +598,7 @@ enum WorkspaceRestorer {
         do {
             try await RegistryClient.downloadArchive(
                 cache: cache,
+                registryConfig: registryConfig,
                 registryURL: archive.registryURL,
                 identity: pin.identity,
                 version: version,
