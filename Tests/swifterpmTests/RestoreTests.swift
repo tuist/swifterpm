@@ -74,6 +74,64 @@ struct RestoreTests {
     }
 
     @Test
+    func writeWorkspaceStatePreservesAndSanitizesExistingPrebuilts() async throws {
+        try await withTemporaryDirectory { root in
+            let package = root.appendingPathComponent("Package")
+            let scratch = root.appendingPathComponent("scratch")
+            let statePath = scratch.appendingPathComponent("workspace-state.json")
+            try await writeCachedManifest(emptyManifest(), packageDir: package)
+            try await AsyncFileSystem.createDirectory(at: scratch, withIntermediateDirectories: true)
+            try await AsyncFileSystem.atomicWrite(
+                JSONFormatter.prettyData([
+                    "object": [
+                        "artifacts": [],
+                        "dependencies": [],
+                        "prebuilts": [
+                            [
+                                "identity": "swift-syntax",
+                                "version": "601.0.0",
+                                "libraryName": "SwiftSyntax",
+                                "path": "\(scratch.path)/prebuilts/swift-syntax\u{0}",
+                                "checkoutPath": "\(scratch.path)/checkouts/swift-syntax\u{0}",
+                                "products": ["SwiftSyntax"],
+                                "includePath": ["Sources/_SwiftSyntaxCShims/include\u{0}"],
+                                "cModules": ["_SwiftSyntaxCShims"],
+                            ],
+                        ],
+                    ],
+                    "version": 7,
+                ]),
+                to: statePath
+            )
+
+            try await WorkspaceRestorer.writeWorkspaceState(
+                packageDir: package,
+                scratchDir: scratch,
+                resolved: ResolvedPins(originHash: "origin", pins: [], version: 3),
+                disableSandbox: false
+            )
+
+            let state = try #require(
+                try JSONSerialization.jsonObject(
+                    with: await AsyncFileSystem.readData(from: statePath))
+                    as? [String: Any])
+            let object = try #require(state["object"] as? [String: Any])
+            let prebuilts = try #require(object["prebuilts"] as? [[String: Any]])
+            let prebuilt = try #require(prebuilts.first)
+
+            #expect(prebuilts.count == 1)
+            #expect(prebuilt["identity"] as? String == "swift-syntax")
+            #expect(prebuilt["libraryName"] as? String == "SwiftSyntax")
+            #expect(prebuilt["path"] as? String == "\(scratch.path)/prebuilts/swift-syntax")
+            #expect(prebuilt["checkoutPath"] as? String == "\(scratch.path)/checkouts/swift-syntax")
+            #expect(
+                prebuilt["includePath"] as? [String] == [
+                    "Sources/_SwiftSyntaxCShims/include",
+                ])
+        }
+    }
+
+    @Test
     func writeWorkspaceStateUsesSourceControlManifestNameAndCheckoutSubpath() async throws {
         try await withTemporaryDirectory { root in
             let package = root.appendingPathComponent("Package")
