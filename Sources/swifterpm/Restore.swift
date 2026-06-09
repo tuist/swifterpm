@@ -192,7 +192,7 @@ enum WorkspaceRestorer {
             at: destination.deletingLastPathComponent()
                 .appendingPathComponent(".\(destination.lastPathComponent).lock")
         )
-        _ = lock
+        defer { _ = lock }
         try await AsyncFileSystem.replaceWithSymlinkedDirectory(
             source: source,
             destination: destination
@@ -215,7 +215,7 @@ enum WorkspaceRestorer {
             expectedChecksum: checksum
         ) {
             let lock = try await cache.lock(namespace: "artifact-archives", key: archivePath.path)
-            _ = lock
+            defer { _ = lock }
             if try await !validCachedBinaryArtifactArchive(
                 archivePath,
                 expectedChecksum: checksum
@@ -271,7 +271,7 @@ enum WorkspaceRestorer {
             at: destination.deletingLastPathComponent()
                 .appendingPathComponent(".\(destination.lastPathComponent).lock")
         )
-        _ = lock
+        defer { _ = lock }
         if try await binaryArtifact(in: destination) != nil {
             return
         }

@@ -438,35 +438,43 @@ private struct DependencyInfo {
 
 private final class BranchRequirements: @unchecked Sendable {
     private let lock = NSLock()
-    private var branches: [PackageReference: String] = [:]
+    private var branches: [String: String] = [:]
 
     func register(package: PackageReference, branch: String) {
         lock.withLock {
-            branches[package] = branch
+            branches[Self.key(for: package)] = branch
         }
     }
 
     func branch(for package: PackageReference) -> String? {
         lock.withLock {
-            branches[package]
+            branches[Self.key(for: package)]
         }
+    }
+
+    private static func key(for package: PackageReference) -> String {
+        "\(package.kind)|\(package.identity.description.lowercased())|\(package.locationString)"
     }
 }
 
 private final class RegistryFallbackLocations: @unchecked Sendable {
     private let lock = NSLock()
-    private var locations: [PackageReference: String] = [:]
+    private var locations: [String: String] = [:]
 
     func register(package: PackageReference, location: String) {
         lock.withLock {
-            locations[package] = location
+            locations[Self.key(for: package)] = location
         }
     }
 
     func location(for package: PackageReference) -> String? {
         lock.withLock {
-            locations[package]
+            locations[Self.key(for: package)]
         }
+    }
+
+    private static func key(for package: PackageReference) -> String {
+        "\(package.kind)|\(package.identity.description.lowercased())|\(package.locationString)"
     }
 }
 
