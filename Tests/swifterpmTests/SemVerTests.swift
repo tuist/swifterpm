@@ -3,8 +3,7 @@ import Testing
 
 struct SemVerTests {
     @Test
-    func semanticVersionsIgnoreBuildMetadataAndOrderPrereleasesBeforeReleases() throws {
-        #expect(try SemVer("1.2.3+build.7").description == "1.2.3")
+    func semanticVersionsOrderPrereleasesBeforeReleases() throws {
         #expect(try SemVer("1.2.3-alpha") < SemVer("1.2.3"))
         #expect(try SemVer("1.2.3") < SemVer("1.2.4"))
     }
@@ -22,6 +21,42 @@ struct SemVerTests {
         #expect(throws: (any Error).self) {
             try SemVer("1.2.3.4")
         }
+    }
+
+    @Test
+    func descriptionPreservesBuildMetadataAndPrerelease() throws {
+        // Build metadata must round-trip so a tag like "1.7.3+cio.1" lands in
+        // Package.resolved verbatim, matching SwiftPM.
+        #expect(try SemVer("1.7.3+cio.1").description == "1.7.3+cio.1")
+        #expect(try SemVer("1.2.3").description == "1.2.3")
+        #expect(try SemVer("1.2.3-alpha.1").description == "1.2.3-alpha.1")
+        #expect(try SemVer("1.0.0-beta.2+build.5").description == "1.0.0-beta.2+build.5")
+    }
+
+    @Test
+    func buildMetadataParsesIntoItsOwnComponent() throws {
+        let version = try SemVer("1.7.3+cio.1")
+        #expect(version.major == 1)
+        #expect(version.minor == 7)
+        #expect(version.patch == 3)
+        #expect(version.prerelease == "")
+        #expect(version.buildMetadata == "cio.1")
+
+        let plain = try SemVer("1.2.3")
+        #expect(plain.buildMetadata == "")
+    }
+
+    @Test
+    func buildMetadataIsIgnoredForOrderingEqualityAndHashing() throws {
+        // Per the SemVer spec, build metadata carries no precedence and does
+        // not change version identity, so resolution behavior is unchanged.
+        #expect(try SemVer("1.7.3+cio.1") == SemVer("1.7.3"))
+        #expect(try !(SemVer("1.7.3+cio.1") < SemVer("1.7.3")))
+        #expect(try !(SemVer("1.7.3") < SemVer("1.7.3+cio.1")))
+        #expect(try SemVer("1.7.3+cio.1").hashValue == SemVer("1.7.3").hashValue)
+
+        let set: Set<SemVer> = try [SemVer("1.7.3+cio.1"), SemVer("1.7.3")]
+        #expect(set.count == 1)
     }
 
     @Test
