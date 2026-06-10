@@ -92,21 +92,27 @@ enum WorkspaceRestorer {
             resolved: resolved,
             disableSandbox: disableSandbox
         )
-        try await ConcurrentTasks.forEach(contexts) { context in
+        let targetGroups = try await ConcurrentTasks.map(contexts) {
+            context -> [(PackageContext, ManifestBinaryTarget)] in
             let manifest = try await ManifestLoader.dumpPackage(
                 packageDir: context.packagePath,
                 disableSandbox: disableSandbox
             )
-            let binaryTargets = try ManifestParser.binaryTargets(manifest)
-            try await ConcurrentTasks.forEach(binaryTargets) { target in
-                try await restoreBinaryArtifact(
-                    target,
-                    context: context,
-                    scratchDir: scratchDir,
-                    cache: cache,
-                    quiet: quiet
-                )
-            }
+            return try ManifestParser.binaryTargets(manifest).map { (context, $0) }
+        }
+        let targets = targetGroups.flatMap { $0 }
+        guard !targets.isEmpty else { return }
+        if !quiet {
+            print("restoring \(targets.count) binary artifact\(targets.count == 1 ? "" : "s")")
+        }
+        try await ConcurrentTasks.forEach(targets) { context, target in
+            try await restoreBinaryArtifact(
+                target,
+                context: context,
+                scratchDir: scratchDir,
+                cache: cache,
+                quiet: quiet
+            )
         }
     }
 
@@ -130,11 +136,13 @@ enum WorkspaceRestorer {
                 _ = lock
                 if try await binaryArtifact(in: cachedArtifact) == nil {
                     try await downloadBinaryArtifact(
+                        identity: identity,
                         targetName: target.name,
                         url: url,
                         checksum: checksum,
                         cache: cache,
-                        destination: cachedArtifact
+                        destination: cachedArtifact,
+                        quiet: quiet
                     )
                 }
             }
@@ -200,11 +208,13 @@ enum WorkspaceRestorer {
     }
 
     private static func downloadBinaryArtifact(
+        identity: String,
         targetName: String,
         url: String,
         checksum: String,
         cache: Cache,
-        destination: URL
+        destination: URL,
+        quiet: Bool
     ) async throws {
         let archivePath = cache.binaryArtifactArchivePath(
             url: url,
@@ -228,6 +238,9 @@ enum WorkspaceRestorer {
                 // binary artifact download, so mirror it here.
                 var headers = await HTTPClient.defaultHeaders(for: remoteURL)
                 headers["Accept"] = "application/octet-stream"
+                if !quiet {
+                    print("downloading \(identity).\(targetName)")
+                }
                 try await HTTPClient.download(
                     url: remoteURL,
                     destination: archivePath,
