@@ -222,10 +222,16 @@ enum WorkspaceRestorer {
             ) {
                 try? await fileSystem.removePath(archivePath)
                 let remoteURL = try artifactURL(url)
+                // GitHub's release asset API returns the asset metadata JSON
+                // (HTTP 200) instead of the archive unless the request accepts
+                // application/octet-stream. SwiftPM sends this header for every
+                // binary artifact download, so mirror it here.
+                var headers = await HTTPClient.defaultHeaders(for: remoteURL)
+                headers["Accept"] = "application/octet-stream"
                 try await HTTPClient.download(
                     url: remoteURL,
                     destination: archivePath,
-                    headers: await HTTPClient.defaultHeaders(for: remoteURL)
+                    headers: headers
                 )
             }
         }
