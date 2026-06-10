@@ -225,6 +225,10 @@ enum WorkspaceRestorer {
             url: url,
             checksum: checksum
         )
+        // A valid cached archive has already been hashed and verified by
+        // `validCachedBinaryArtifactArchive`, so extract it directly. Only a
+        // freshly downloaded archive needs the (single) verification hash;
+        // re-hashing a known-good multi-hundred-MB archive is pure waste.
         if try await !validCachedBinaryArtifactArchive(
             archivePath,
             expectedChecksum: checksum
@@ -243,15 +247,15 @@ enum WorkspaceRestorer {
                     destination: archivePath,
                     headers: await HTTPClient.binaryArtifactHeaders(for: remoteURL)
                 )
-            }
-        }
 
-        let actualChecksum = try Hashing.sha256Hex(fileAt: archivePath)
-        guard actualChecksum.caseInsensitiveCompare(checksum) == .orderedSame else {
-            try? await fileSystem.removePath(archivePath)
-            throw ToolError.message(
-                "\(targetName) checksum mismatch: expected \(checksum), got \(actualChecksum)"
-            )
+                let actualChecksum = try Hashing.sha256Hex(fileAt: archivePath)
+                guard actualChecksum.caseInsensitiveCompare(checksum) == .orderedSame else {
+                    try? await fileSystem.removePath(archivePath)
+                    throw ToolError.message(
+                        "\(targetName) checksum mismatch: expected \(checksum), got \(actualChecksum)"
+                    )
+                }
+            }
         }
 
         try await extractBinaryArtifactArchive(
