@@ -527,39 +527,18 @@ enum CLIRunner {
             cli.forceResolvedVersions || cli.disableAutomaticResolution
             || cli.onlyUseVersionsFromResolvedFile
 
-        let resolved: ResolvedPins
-        let hasResolvedFile =
-            cli.skipUpdate
-            ? try await fileSystem.exists(package.appendingPathComponent("Package.resolved").absolutePath)
-            : false
-        if readOnly || hasResolvedFile {
-            resolved = try await ResolvedFile.read(packageDir: package)
-        } else if preferResolvedFile,
-                  let existing = try await ResolvedFile.readIfCurrent(packageDir: package)
-        {
-            if shouldWrite(write: write, printOnly: printOnly) {
-                try await ResolvedFile.write(packageDir: package, resolved: existing)
-            }
-            resolved = existing
-        } else {
-            let progress = cli.quiet ? nil : ResolutionProgressReporter()
-            // Mirror SwiftPM: `resolve` seeds the solver with the existing
-            // Package.resolved (even a stale one) so only pins that no longer
-            // satisfy the manifest change; `update` resolves from scratch.
-            let existingPins = preferResolvedFile
-                ? ((try? await ResolvedFile.read(packageDir: package))?.pins ?? [])
-                : []
-            let fresh = try await PackageResolver.resolve(
-                packageDir: package, cache: cache, registryConfig: registryConfig,
-                disableSandbox: cli.disableSandbox,
-                scmToRegistryTransformation: try scmToRegistryTransformation(cli),
-                existingPins: existingPins,
-                progress: progress)
-            if shouldWrite(write: write, printOnly: printOnly) {
-                try await ResolvedFile.write(packageDir: package, resolved: fresh)
-            }
-            resolved = fresh
-        }
+        let resolved = try await PackageResolver.resolveOrLoad(
+            packageDir: package,
+            cache: cache,
+            registryConfig: registryConfig,
+            disableSandbox: cli.disableSandbox,
+            scmToRegistryTransformation: try scmToRegistryTransformation(cli),
+            preferResolvedFile: preferResolvedFile,
+            readOnly: readOnly,
+            skipUpdate: cli.skipUpdate,
+            writeResolvedFile: shouldWrite(write: write, printOnly: printOnly),
+            progress: cli.quiet ? nil : ResolutionProgressReporter()
+        )
 
         if !cli.quiet {
             ResolvedFile.print(resolved)

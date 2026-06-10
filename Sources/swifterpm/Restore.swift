@@ -100,19 +100,26 @@ enum WorkspaceRestorer {
             )
             return try ManifestParser.binaryTargets(manifest).map { (context, $0) }
         }
-        let targets = targetGroups.flatMap { $0 }
-        guard !targets.isEmpty else { return }
+        let total = targetGroups.reduce(0) { $0 + $1.count }
+        guard total > 0 else { return }
         if !quiet {
-            print("restoring \(targets.count) binary artifact\(targets.count == 1 ? "" : "s")")
+            print("restoring \(total) binary artifact\(total == 1 ? "" : "s")")
         }
-        try await ConcurrentTasks.forEach(targets) { context, target in
-            try await restoreBinaryArtifact(
-                target,
-                context: context,
-                scratchDir: scratchDir,
-                cache: cache,
-                quiet: quiet
-            )
+        // Keep the original per-context fan-out: downloads across packages run
+        // concurrently, and the targets within each package run concurrently
+        // too. Flattening into a single pool would have capped total in-flight
+        // downloads at one `ConcurrentTasks` width, slowing multi-package,
+        // multi-target restores on high-latency hosts.
+        try await ConcurrentTasks.forEach(targetGroups) { group in
+            try await ConcurrentTasks.forEach(group) { context, target in
+                try await restoreBinaryArtifact(
+                    target,
+                    context: context,
+                    scratchDir: scratchDir,
+                    cache: cache,
+                    quiet: quiet
+                )
+            }
         }
     }
 
@@ -232,19 +239,13 @@ enum WorkspaceRestorer {
             ) {
                 try? await fileSystem.removePath(archivePath)
                 let remoteURL = try artifactURL(url)
-                // GitHub's release asset API returns the asset metadata JSON
-                // (HTTP 200) instead of the archive unless the request accepts
-                // application/octet-stream. SwiftPM sends this header for every
-                // binary artifact download, so mirror it here.
-                var headers = await HTTPClient.defaultHeaders(for: remoteURL)
-                headers["Accept"] = "application/octet-stream"
                 if !quiet {
                     print("downloading \(identity).\(targetName)")
                 }
                 try await HTTPClient.download(
                     url: remoteURL,
                     destination: archivePath,
-                    headers: headers
+                    headers: await HTTPClient.binaryArtifactHeaders(for: remoteURL)
                 )
             }
         }

@@ -31,7 +31,7 @@ struct SwiftPMResolverTests {
             )
         )
 
-        let reference = try swiftPMPackageReference(for: dependency)
+        let reference = try SwiftPMResolverBridge.swiftPMPackageReference(for: dependency)
 
         #expect(reference.identity == PackageIdentity.plain("dependency"))
         #expect(reference.kind == .remoteSourceControl(SourceControlURL(location)))
@@ -48,7 +48,7 @@ struct SwiftPMResolverTests {
             requirement: .exact(SemVer(major: 1, minor: 0, patch: 14))
         )
 
-        let reference = try swiftPMPackageReference(for: dependency)
+        let reference = try SwiftPMResolverBridge.swiftPMPackageReference(for: dependency)
 
         #expect(reference.locationString == "git@github.com:riversidefm/Riverside-Mobile-ffmpeg-kit.git")
     }
@@ -66,7 +66,7 @@ struct SwiftPMResolverTests {
             )
         )
 
-        let reference = try storedPackageReference(for: pin)
+        let reference = try SwiftPMResolverBridge.storedPackageReference(for: pin)
 
         #expect(reference.identity == PackageIdentity.plain("riverside-mobile-shared"))
         #expect(reference.locationString == "git@github.com:riversidefm/Riverside-Mobile-Shared.git")
@@ -80,13 +80,13 @@ struct SwiftPMResolverTests {
         let emptyPin = ResolvedState(branch: nil, revision: nil, version: nil)
 
         #expect(
-            storedResolutionState(for: pin(state: versionPin))
+            SwiftPMResolverBridge.storedResolutionState(for: pin(state: versionPin))
                 == .version(try SwiftPMVersion(versionString: "1.7.4"), revision: "abc123"))
         #expect(
-            storedResolutionState(for: pin(state: branchPin))
+            SwiftPMResolverBridge.storedResolutionState(for: pin(state: branchPin))
                 == .branch(name: "shutdown-patch", revision: "def456"))
-        #expect(storedResolutionState(for: pin(state: revisionPin)) == .revision("0123abc"))
-        #expect(storedResolutionState(for: pin(state: emptyPin)) == nil)
+        #expect(SwiftPMResolverBridge.storedResolutionState(for: pin(state: revisionPin)) == .revision("0123abc"))
+        #expect(SwiftPMResolverBridge.storedResolutionState(for: pin(state: emptyPin)) == nil)
     }
 
     @Test
@@ -113,7 +113,7 @@ struct SwiftPMResolverTests {
             ),
         ]
 
-        let store = resolvedPackagesStore(pins)
+        let store = SwiftPMResolverBridge.resolvedPackagesStore(pins)
 
         #expect(store.count == 2)
         let swiftLog = try #require(store[PackageIdentity.plain("swift-log")])
@@ -123,6 +123,36 @@ struct SwiftPMResolverTests {
                 == .version(try SwiftPMVersion(versionString: "1.12.0"), revision: "abc123"))
         let sotoCore = try #require(store[PackageIdentity.plain("soto-core")])
         #expect(sotoCore.state == .branch(name: "shutdown-patch", revision: "def456"))
+    }
+
+    @Test
+    func resolvedPackagesStoreDedupesPinsDifferingOnlyByIdentityCase() throws {
+        // `PackageIdentity.plain` lowercases, so these two collide on one store
+        // key. The seed must keep one deterministically (preferring the
+        // versioned pin) rather than whichever happens to be iterated last,
+        // otherwise the dropped identity gets re-resolved freely.
+        let pins = [
+            ResolvedPin(
+                identity: "Swift-Log",
+                kind: "remoteSourceControl",
+                location: "https://github.com/apple/swift-log.git",
+                state: ResolvedState(branch: nil, revision: nil, version: nil)
+            ),
+            ResolvedPin(
+                identity: "swift-log",
+                kind: "remoteSourceControl",
+                location: "https://github.com/apple/swift-log.git",
+                state: ResolvedState(branch: nil, revision: "abc123", version: "1.12.0")
+            ),
+        ]
+
+        let store = SwiftPMResolverBridge.resolvedPackagesStore(pins)
+
+        #expect(store.count == 1)
+        let pin = try #require(store[PackageIdentity.plain("swift-log")])
+        // The versioned pin wins over the revision-less one regardless of order.
+        #expect(
+            pin.state == .version(try SwiftPMVersion(versionString: "1.12.0"), revision: "abc123"))
     }
 
     @Test
@@ -143,7 +173,7 @@ struct SwiftPMResolverTests {
                 ),
             ]
 
-            let store = resolvedPackagesStore(pins)
+            let store = SwiftPMResolverBridge.resolvedPackagesStore(pins)
 
             let registry = try #require(store[PackageIdentity.plain("apple.swift-log")])
             guard case .registry = registry.packageRef.kind else {

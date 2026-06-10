@@ -353,7 +353,7 @@ final class SwiftPMPackageContainer: PackageContainer {
 
         var constraints: [PackageContainerConstraint] = []
         for dependency in dependencies {
-            let packageReference = try swiftPMPackageReference(for: dependency)
+            let packageReference = try SwiftPMResolverBridge.swiftPMPackageReference(for: dependency)
             if dependency.kind == .registry, dependency.location != dependency.identity {
                 registryFallbackLocations.register(
                     package: packageReference,
@@ -498,7 +498,7 @@ enum SwiftPMResolverBridge {
 
         var constraints: [PackageContainerConstraint] = []
         for dependency in dependencies {
-            let packageReference = try swiftPMPackageReference(for: dependency)
+            let packageReference = try SwiftPMResolverBridge.swiftPMPackageReference(for: dependency)
             if dependency.kind == .registry, dependency.location != dependency.identity {
                 provider.registerRegistryFallbackLocation(
                     package: packageReference,
@@ -544,59 +544,82 @@ enum SwiftPMResolverBridge {
         }
         return pins
     }
-}
 
-func resolvedPackagesStore(_ pins: [ResolvedPin]) -> ResolvedPackagesStore.ResolvedPackages {
-    var store: ResolvedPackagesStore.ResolvedPackages = [:]
-    for pin in pins {
-        guard let reference = try? storedPackageReference(for: pin),
-              let state = storedResolutionState(for: pin)
-        else { continue }
-        store[reference.identity] = ResolvedPackagesStore.ResolvedPackage(
-            packageRef: reference,
-            state: state,
-            originalScmUrl: nil
-        )
-    }
-    return store
-}
-
-func storedPackageReference(for pin: ResolvedPin) throws -> PackageReference {
-    let identity = PackageIdentity.plain(pin.identity)
-    if PinKind.isRegistry(pin.kind) {
-        return .registry(identity: identity)
-    }
-    if pin.location.hasPrefix("/") {
-        return try .localSourceControl(
-            identity: identity,
-            path: AbsolutePath(validating: pin.location)
-        )
-    }
-    if let url = Foundation.URL(string: pin.location), url.isFileURL {
-        return try .localSourceControl(
-            identity: identity,
-            path: AbsolutePath(validating: url.path)
-        )
-    }
-    return .remoteSourceControl(
-        identity: identity,
-        url: SourceControlURL(pin.location)
-    )
-}
-
-func storedResolutionState(for pin: ResolvedPin) -> ResolvedPackagesStore.ResolutionState? {
-    if let branch = pin.state.branch, let revision = pin.state.revision {
-        return .branch(name: branch, revision: revision)
-    }
-    if let version = pin.state.version,
-       let parsed = try? SwiftPMVersion(versionString: version)
+    static func resolvedPackagesStore(_ pins: [ResolvedPin]) -> ResolvedPackagesStore
+        .ResolvedPackages
     {
-        return .version(parsed, revision: pin.state.revision)
+        var store: ResolvedPackagesStore.ResolvedPackages = [:]
+        // `PackageIdentity.plain` lowercases, so pins differing only by case
+        // collide on the same store key. Dedupe first (preferring versioned
+        // pins) so seeding is deterministic instead of last-iteration-wins.
+        for pin in PackageResolver.dedupePinsByIdentity(pins) {
+            guard let reference = try? storedPackageReference(for: pin),
+                  let state = storedResolutionState(for: pin)
+            else { continue }
+            store[reference.identity] = ResolvedPackagesStore.ResolvedPackage(
+                packageRef: reference,
+                state: state,
+                originalScmUrl: nil
+            )
+        }
+        return store
     }
-    if let revision = pin.state.revision {
-        return .revision(revision)
+
+    static func storedPackageReference(for pin: ResolvedPin) throws -> PackageReference {
+        try packageReference(
+            identity: pin.identity,
+            location: pin.location,
+            isRegistry: PinKind.isRegistry(pin.kind)
+        )
     }
-    return nil
+
+    static func swiftPMPackageReference(for dependency: ManifestDependency) throws
+        -> PackageReference
+    {
+        try packageReference(
+            identity: dependency.identity,
+            location: dependency.location,
+            isRegistry: dependency.kind == .registry
+        )
+    }
+
+    /// Build a SwiftPM `PackageReference` from a raw identity and location,
+    /// shared by the pin (resolved) and dependency (manifest) paths so the two
+    /// cannot drift on how a location maps to local / remote / registry.
+    private static func packageReference(
+        identity: String,
+        location: String,
+        isRegistry: Bool
+    ) throws -> PackageReference {
+        let id = PackageIdentity.plain(identity)
+        if isRegistry {
+            return .registry(identity: id)
+        }
+        if location.hasPrefix("/") {
+            return try .localSourceControl(identity: id, path: AbsolutePath(validating: location))
+        }
+        if let url = Foundation.URL(string: location), url.isFileURL {
+            return try .localSourceControl(identity: id, path: AbsolutePath(validating: url.path))
+        }
+        return .remoteSourceControl(identity: id, url: SourceControlURL(location))
+    }
+
+    static func storedResolutionState(for pin: ResolvedPin) -> ResolvedPackagesStore
+        .ResolutionState?
+    {
+        if let branch = pin.state.branch, let revision = pin.state.revision {
+            return .branch(name: branch, revision: revision)
+        }
+        if let version = pin.state.version,
+           let parsed = try? SwiftPMVersion(versionString: version)
+        {
+            return .version(parsed, revision: pin.state.revision)
+        }
+        if let revision = pin.state.revision {
+            return .revision(revision)
+        }
+        return nil
+    }
 }
 
 private func swiftPMPackageRequirement(for requirement: Requirement) throws -> PackageRequirement {
@@ -609,31 +632,6 @@ private func swiftPMPackageRequirement(for requirement: Requirement) throws -> P
         return .revision(branch)
     case .revision(let revision):
         return .revision(revision)
-    }
-}
-
-func swiftPMPackageReference(for dependency: ManifestDependency) throws -> PackageReference {
-    let identity = PackageIdentity.plain(dependency.identity)
-    switch dependency.kind {
-    case .registry:
-        return .registry(identity: identity)
-    case .sourceControl:
-        if dependency.location.hasPrefix("/") {
-            return try .localSourceControl(
-                identity: identity,
-                path: AbsolutePath(validating: dependency.location)
-            )
-        }
-        if let url = Foundation.URL(string: dependency.location), url.isFileURL {
-            return try .localSourceControl(
-                identity: identity,
-                path: AbsolutePath(validating: url.path)
-            )
-        }
-        return .remoteSourceControl(
-            identity: identity,
-            url: SourceControlURL(dependency.location)
-        )
     }
 }
 

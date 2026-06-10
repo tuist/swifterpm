@@ -109,7 +109,61 @@ enum PackageResolver {
         }
     }
 
-    private static func dedupePinsByIdentity(_ pins: [ResolvedPin]) -> [ResolvedPin] {
+    /// Load the resolved pins for `packageDir`, resolving fresh only when
+    /// needed. Centralizes the read-only / current-file / seed-and-resolve
+    /// decision so every entry point (and any `SwifterPMCore` embedder) seeds
+    /// the solver identically instead of re-resolving from scratch.
+    static func resolveOrLoad(
+        packageDir: URL,
+        cache: Cache,
+        registryConfig: RegistryConfig,
+        disableSandbox: Bool,
+        scmToRegistryTransformation: SCMToRegistryTransformation,
+        preferResolvedFile: Bool,
+        readOnly: Bool,
+        skipUpdate: Bool,
+        writeResolvedFile: Bool,
+        progress: ResolutionProgressReporter?
+    ) async throws -> ResolvedPins {
+        let hasResolvedFile =
+            skipUpdate
+            ? try await fileSystem.exists(
+                packageDir.appendingPathComponent("Package.resolved").absolutePath)
+            : false
+        if readOnly || hasResolvedFile {
+            return try await ResolvedFile.read(packageDir: packageDir)
+        }
+        if preferResolvedFile,
+           let existing = try await ResolvedFile.readIfCurrent(packageDir: packageDir)
+        {
+            if writeResolvedFile {
+                try await ResolvedFile.write(packageDir: packageDir, resolved: existing)
+            }
+            return existing
+        }
+        // Mirror SwiftPM: `resolve` seeds the solver with the existing
+        // Package.resolved (even a stale one) so only pins that no longer
+        // satisfy the manifest change; `update` resolves from scratch.
+        let existingPins =
+            preferResolvedFile
+            ? ((try? await ResolvedFile.read(packageDir: packageDir))?.pins ?? [])
+            : []
+        let fresh = try await resolve(
+            packageDir: packageDir,
+            cache: cache,
+            registryConfig: registryConfig,
+            disableSandbox: disableSandbox,
+            scmToRegistryTransformation: scmToRegistryTransformation,
+            existingPins: existingPins,
+            progress: progress
+        )
+        if writeResolvedFile {
+            try await ResolvedFile.write(packageDir: packageDir, resolved: fresh)
+        }
+        return fresh
+    }
+
+    static func dedupePinsByIdentity(_ pins: [ResolvedPin]) -> [ResolvedPin] {
         var order: [String] = []
         var chosen: [String: ResolvedPin] = [:]
         for pin in pins {

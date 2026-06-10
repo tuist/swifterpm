@@ -121,6 +121,17 @@ enum HTTPClient {
         return headers
     }
 
+    /// Headers for downloading a binary artifact archive. GitHub's release-asset
+    /// API (and similar release-asset proxies) returns the asset metadata JSON
+    /// with HTTP 200 unless the request accepts the raw bytes, so SwiftPM sends
+    /// `Accept: application/octet-stream` for every binary artifact download.
+    /// Centralized here so any binary downloader gets the same treatment.
+    static func binaryArtifactHeaders(for url: URL) async -> [String: String] {
+        var headers = await defaultHeaders(for: url)
+        headers["Accept"] = "application/octet-stream"
+        return headers
+    }
+
     static func data(url: URL, headers: [String: String] = [:]) async throws -> Data {
         var request = URLRequest(url: url)
         for (key, value) in headers {
