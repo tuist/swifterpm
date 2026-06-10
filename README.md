@@ -139,6 +139,13 @@ Add `--tuist-source ../tuist` to include a local Tuist checkout in the benchmark
 
 The script writes Markdown and JSON reports under `benchmark-results`.
 
+Representative one-run sample from the corrected cache-isolated setup, generated on Apple Swift 6.3.2:
+
+| Codebase | Scenario | SwiftPM | swifterpm | Time reduction | Speedup |
+|:---|:---|---:|---:|---:|---:|
+| Firefox iOS root `Package.swift` | Cold | 110.360 s | 6.260 s | 94.33% | 17.63x |
+| Firefox iOS root `Package.swift` | Worktree-warm | 2.990 s | 0.270 s | 90.97% | 11.07x |
+
 Cold resolution removes package-local scratch directories plus each tool's benchmark-local shared cache before each measured run. Worktree-warm resolution removes package-local scratch directories before each measured run while keeping each tool's already-primed benchmark-local shared cache, which models switching to another clean worktree.
 
 Both tools are run against the checked-in `Package.resolved` file with forced resolved versions. The benchmark passes `--cache-path` to SwiftPM so local user-level SwiftPM caches do not make the SwiftPM cold run warmer than the `swifterpm` cold run.
