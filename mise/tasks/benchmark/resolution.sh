@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-#MISE description="Benchmark SwiftPM resolution against swifterpm on real iOS repositories"
+#MISE description="Benchmark SwiftPM resolution against swifterpm on real repositories and pinned fixtures"
 #USAGE flag "--runs <runs>" help="Number of hyperfine runs per benchmark" default="3"
 #USAGE flag "--output-dir <output-dir>" help="Directory where benchmark reports are written" default="benchmark-results"
 #USAGE flag "--swifterpm-bin <swifterpm-bin>" help="Path to a swifterpm executable. Defaults to bazel-bin/swifterpm"
-#USAGE flag "--tuist-source <tuist-source>" help="Path to a local Tuist checkout to include in the benchmark"
+#USAGE flag "--tuist-source <tuist-source>" help="Path to a local Tuist checkout to use instead of cloning tuist/tuist"
 set -euo pipefail
 
 runs="3"
@@ -138,6 +138,7 @@ benchmark_prepared_codebase() {
   local slug="$2"
   local source_dir="$3"
   local package_relative_path="$4"
+  local resolved_mode="${5:-checked-in}"
 
   local codebase_root="${work_root}/${slug}"
   local swiftpm_dir="${codebase_root}/swiftpm"
@@ -148,6 +149,14 @@ benchmark_prepared_codebase() {
     echo "${name} does not contain ${package_relative_path}/Package.swift" >&2
     exit 1
   fi
+
+  if [[ "${resolved_mode}" == "refresh" ]]; then
+    refresh_resolved_file "${name}" "${slug}" "${source_package_dir}"
+  elif [[ "${resolved_mode}" != "checked-in" ]]; then
+    echo "unknown Package.resolved mode for ${name}: ${resolved_mode}" >&2
+    exit 1
+  fi
+
   if [[ ! -f "${source_package_dir}/Package.resolved" ]]; then
     echo "${name} does not contain ${package_relative_path}/Package.resolved" >&2
     echo "SwiftPM and swifterpm are benchmarked with --force-resolved-versions, so Package.resolved is required." >&2
@@ -212,19 +221,42 @@ benchmark_prepared_codebase() {
     "${output_dir}/${slug}-warm.json"
 }
 
+refresh_resolved_file() {
+  local name="$1"
+  local slug="$2"
+  local package_dir="$3"
+  local scratch="${work_root}/${slug}/resolved-refresh-build"
+  local cache="${work_root}/${slug}/resolved-refresh-cache"
+
+  echo "Refreshing Package.resolved for ${name}"
+  rm -rf "${scratch}" "${cache}"
+  swift package \
+    --package-path "${package_dir}" \
+    --scratch-path "${scratch}" \
+    --cache-path "${cache}" \
+    resolve >/dev/null
+  rm -rf "${scratch}" "${cache}"
+}
+
 benchmark_codebase() {
   local name="$1"
   local slug="$2"
   local repo="$3"
   local ref="$4"
   local package_relative_path="$5"
+  local resolved_mode="${6:-checked-in}"
 
   local source_dir="${work_root}/${slug}/source"
 
   echo "Cloning ${name} (${repo}@${ref})"
   git clone --depth 1 --branch "${ref}" "${repo}" "${source_dir}"
 
-  benchmark_prepared_codebase "${name}" "${slug}" "${source_dir}" "${package_relative_path}"
+  benchmark_prepared_codebase \
+    "${name}" \
+    "${slug}" \
+    "${source_dir}" \
+    "${package_relative_path}" \
+    "${resolved_mode}"
 }
 
 benchmark_local_codebase() {
@@ -232,15 +264,24 @@ benchmark_local_codebase() {
   local slug="$2"
   local source="$3"
   local package_relative_path="$4"
+  local resolved_mode="${5:-checked-in}"
 
   local absolute_source
   absolute_source="$(cd "${source}" && pwd)"
+  local source_dir="${work_root}/${slug}/source"
 
   echo "Copying ${name} from ${absolute_source}"
-  benchmark_prepared_codebase "${name}" "${slug}" "${absolute_source}" "${package_relative_path}"
+  copy_tree "${absolute_source}" "${source_dir}"
+  benchmark_prepared_codebase \
+    "${name}" \
+    "${slug}" \
+    "${source_dir}" \
+    "${package_relative_path}" \
+    "${resolved_mode}"
 }
 
 mkdir -p "${output_dir}"
+repo_root="${PWD}"
 output_dir="$(cd "${output_dir}" && pwd)"
 combined_report="${output_dir}/resolution-latest.md"
 work_root="$(mktemp -d)"
@@ -253,6 +294,8 @@ trap 'rm -rf "${work_root}"' EXIT
   echo
   echo "Cold resolution removes package-local scratch directories plus each tool's benchmark-local shared cache before each measured run."
   echo "Worktree-warm resolution removes package-local scratch directories before each measured run, but keeps each tool's already-primed benchmark-local shared cache to model switching to another clean worktree."
+  echo "Tuist refreshes Package.resolved in the temporary clone before timing because the current tuist/tuist main branch can lag manifest changes."
+  echo "SwiftNIO uses this repository's pinned third_party/nio fixture because upstream SwiftNIO does not commit a root Package.resolved."
   echo
 } > "${combined_report}"
 
@@ -275,8 +318,23 @@ if [[ -n "${tuist_source}" ]]; then
     "Tuist" \
     "tuist" \
     "${tuist_source}" \
-    "."
+    "." \
+    "refresh"
+else
+  benchmark_codebase \
+    "Tuist" \
+    "tuist" \
+    "https://github.com/tuist/tuist.git" \
+    "main" \
+    "." \
+    "refresh"
 fi
+
+benchmark_local_codebase \
+  "SwiftNIO" \
+  "swift-nio" \
+  "${repo_root}/third_party/nio" \
+  "."
 
 echo "Benchmark reports written to ${output_dir}"
 echo "Combined report: ${combined_report}"
