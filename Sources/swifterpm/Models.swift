@@ -59,7 +59,7 @@ enum ResolvedFile {
             return
         }
         let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         let data = try encoder.encode(resolved) + Data("\n".utf8)
         try await AsyncFileSystem.atomicWrite(data, to: path)
     }
