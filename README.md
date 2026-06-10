@@ -137,13 +137,8 @@ mise run benchmark:resolution -- --runs 3
 
 Add `--tuist-source ../tuist` to include a local Tuist checkout in the benchmark.
 
-Latest three-run sample, generated on macOS 26.4.1 with Apple Swift 6.3.2 after removing the default XDG `swifterpm` cache:
+The script writes Markdown and JSON reports under `benchmark-results`.
 
-| Codebase | Scenario | SwiftPM | swifterpm | Time reduction | Speedup |
-|:---|:---|---:|---:|---:|---:|
-| Pocket Casts iOS `Modules/Package.swift` | Cold | 236.579 s | 248.782 s | -5.16% | 0.95x |
-| Pocket Casts iOS `Modules/Package.swift` | Worktree-warm | 148.686 s | 0.625 s | 99.58% | 237.95x |
-| Firefox iOS root `Package.swift` | Cold | 16.460 s | 28.203 s | -71.35% | 0.58x |
-| Firefox iOS root `Package.swift` | Worktree-warm | 4.472 s | 0.434 s | 90.30% | 10.30x |
+Cold resolution removes package-local scratch directories plus each tool's benchmark-local shared cache before each measured run. Worktree-warm resolution removes package-local scratch directories before each measured run while keeping each tool's already-primed benchmark-local shared cache, which models switching to another clean worktree.
 
-Cold resolution removes package-local scratch directories and `swifterpm`'s cache before each run. Worktree-warm resolution removes package-local scratch directories before each run while keeping already-primed global caches, which models switching to another clean worktree.
+Both tools are run against the checked-in `Package.resolved` file with forced resolved versions. The benchmark passes `--cache-path` to SwiftPM so local user-level SwiftPM caches do not make the SwiftPM cold run warmer than the `swifterpm` cold run.
