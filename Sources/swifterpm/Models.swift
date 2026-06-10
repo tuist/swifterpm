@@ -36,7 +36,7 @@ struct ResolvedState: Codable, Equatable, Sendable {
 enum ResolvedFile {
     static func readIfCurrent(packageDir: URL) async throws -> ResolvedPins? {
         let path = packageDir.appendingPathComponent("Package.resolved")
-        guard try await AsyncFileSystem.exists(path) else { return nil }
+        guard try await fileSystem.exists(path.absolutePath) else { return nil }
 
         let resolved = try await read(packageDir: packageDir)
         guard let originHash = resolved.originHash else { return nil }
@@ -47,21 +47,21 @@ enum ResolvedFile {
     }
 
     static func read(packageDir: URL) async throws -> ResolvedPins {
-        let data = try await AsyncFileSystem.readData(
-            from: packageDir.appendingPathComponent("Package.resolved"))
+        let data = try await fileSystem.readFile(
+            at: packageDir.appendingPathComponent("Package.resolved").absolutePath)
         return try JSONDecoder().decode(ResolvedPins.self, from: data)
     }
 
     static func write(packageDir: URL, resolved: ResolvedPins) async throws {
         let path = packageDir.appendingPathComponent("Package.resolved")
         if resolved.pins.isEmpty {
-            try await AsyncFileSystem.removePath(path)
+            try await fileSystem.removePath(path)
             return
         }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         let data = try encoder.encode(resolved) + Data("\n".utf8)
-        try await AsyncFileSystem.atomicWrite(data, to: path)
+        try await fileSystem.atomicWrite(data, to: path)
     }
 
     static func print(_ resolved: ResolvedPins) {
@@ -80,8 +80,8 @@ enum ResolvedFile {
 
     static func packageOriginHash(packageDir: URL) async throws -> String {
         try Hashing.sha256Hex(
-            await AsyncFileSystem.readData(
-                from: packageDir.appendingPathComponent("Package.swift")))
+            await fileSystem.readFile(
+                at: packageDir.appendingPathComponent("Package.swift").absolutePath))
     }
 }
 

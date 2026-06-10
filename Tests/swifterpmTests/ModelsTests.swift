@@ -95,7 +95,7 @@ struct ModelsTests {
             #expect(try await ResolvedFile.readIfCurrent(packageDir: root)?.pins == resolved.pins)
 
             let resolvedFilePath = root.appendingPathComponent("Package.resolved")
-            let rawData = try await AsyncFileSystem.readData(from: resolvedFilePath)
+            let rawData = try await fileSystem.readFile(at: resolvedFilePath.absolutePath)
             let rawContents = try #require(String(data: rawData, encoding: .utf8))
             #expect(rawContents.contains("https://github.com/example/foo"))
             #expect(!rawContents.contains(#"https:\/\/github.com\/example\/foo"#))
@@ -120,8 +120,7 @@ struct ModelsTests {
         let fixture = try await fixtureURL("MixedRegistryAndGitHub")
         let resolved = try await ResolvedFile.read(packageDir: fixture)
         let packageManifest = try String(
-            data: await AsyncFileSystem.readData(
-                from: fixture.appendingPathComponent("Package.swift")),
+            data: await fileSystem.readFile(at: fixture.appendingPathComponent("Package.swift").absolutePath),
             encoding: .utf8
         )
         let identities = Set(resolved.pins.map(\.identity))

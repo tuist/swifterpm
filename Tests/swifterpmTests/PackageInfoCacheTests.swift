@@ -22,12 +22,12 @@ struct PackageInfoCacheTests {
 
             let indexPath = cacheDir.appendingPathComponent("index.json")
             let rootPath = cacheDir.appendingPathComponent("root.json")
-            #expect(try await AsyncFileSystem.exists(indexPath))
-            #expect(try await AsyncFileSystem.exists(rootPath))
+            #expect(try await fileSystem.exists(indexPath.absolutePath))
+            #expect(try await fileSystem.exists(rootPath.absolutePath))
 
             let index = try #require(
                 JSONSerialization.jsonObject(
-                    with: try await AsyncFileSystem.readData(from: indexPath))
+                    with: try await fileSystem.readFile(at: indexPath.absolutePath))
                     as? [String: Any])
             #expect(index["schema_version"] as? Int == 1)
             #expect((index["packages"] as? [[String: Any]])?.isEmpty == true)
@@ -47,7 +47,7 @@ struct PackageInfoCacheTests {
             try await writeInvalidManifest(packageDir: package)
 
             try await Task.sleep(nanoseconds: 10_000_000)
-            try await AsyncFileSystem.atomicWrite(
+            try await fileSystem.atomicWrite(
                 try JSONFormatter.prettyData(emptyManifest(name: "CachedRoot")),
                 to: cacheDir.appendingPathComponent("root.json"))
 
@@ -62,13 +62,11 @@ struct PackageInfoCacheTests {
 
             let rootInfo = try #require(
                 JSONSerialization.jsonObject(
-                    with: try await AsyncFileSystem.readData(
-                        from: cacheDir.appendingPathComponent("root.json")))
+                    with: try await fileSystem.readFile(at: cacheDir.appendingPathComponent("root.json").absolutePath))
                     as? [String: Any])
             #expect(rootInfo["name"] as? String == "CachedRoot")
             #expect(
-                try await AsyncFileSystem.exists(
-                    ManifestLoader.cacheFilePath(packageDir: package)) == false)
+                try await fileSystem.exists(ManifestLoader.cacheFilePath(packageDir: package).absolutePath) == false)
         }
     }
 
@@ -94,7 +92,7 @@ struct PackageInfoCacheTests {
                 cacheDir
                 .appendingPathComponent("packages")
                 .appendingPathComponent("foo-\(entryHashForTest(pin)).json")
-            try await AsyncFileSystem.atomicWrite(
+            try await fileSystem.atomicWrite(
                 try JSONFormatter.prettyData(emptyManifest(name: "CachedDependency")),
                 to: packageInfoPath)
 
@@ -109,12 +107,11 @@ struct PackageInfoCacheTests {
 
             let dependencyInfo = try #require(
                 JSONSerialization.jsonObject(
-                    with: try await AsyncFileSystem.readData(from: packageInfoPath))
+                    with: try await fileSystem.readFile(at: packageInfoPath.absolutePath))
                     as? [String: Any])
             #expect(dependencyInfo["name"] as? String == "CachedDependency")
             #expect(
-                try await AsyncFileSystem.exists(
-                    ManifestLoader.cacheFilePath(packageDir: checkout)) == false)
+                try await fileSystem.exists(ManifestLoader.cacheFilePath(packageDir: checkout).absolutePath) == false)
         }
     }
 
@@ -124,7 +121,7 @@ struct PackageInfoCacheTests {
             let package = root.appendingPathComponent("Package")
             let scratch = root.appendingPathComponent("scratch")
             let cacheDir = root.appendingPathComponent("package-info")
-            try await AsyncFileSystem.atomicWrite(
+            try await fileSystem.atomicWrite(
                 try JSONFormatter.prettyData(emptyManifest(name: "StaleRoot")),
                 to: cacheDir.appendingPathComponent("root.json"))
 
@@ -142,8 +139,7 @@ struct PackageInfoCacheTests {
 
             let rootInfo = try #require(
                 JSONSerialization.jsonObject(
-                    with: try await AsyncFileSystem.readData(
-                        from: cacheDir.appendingPathComponent("root.json")))
+                    with: try await fileSystem.readFile(at: cacheDir.appendingPathComponent("root.json").absolutePath))
                     as? [String: Any])
             #expect(rootInfo["name"] as? String == "FreshRoot")
         }
@@ -189,8 +185,7 @@ struct PackageInfoCacheTests {
 
             let index = try #require(
                 JSONSerialization.jsonObject(
-                    with: try await AsyncFileSystem.readData(
-                        from: cacheDir.appendingPathComponent("index.json")))
+                    with: try await fileSystem.readFile(at: cacheDir.appendingPathComponent("index.json").absolutePath))
                     as? [String: Any])
             let packages = try #require(index["packages"] as? [[String: Any]])
 
@@ -203,7 +198,7 @@ struct PackageInfoCacheTests {
                     == PathCanonicalizer.realpath(localOne).path)
             for package in packages {
                 let packageInfoPath = try #require(package["package_info_path"] as? String)
-                #expect(try await AsyncFileSystem.exists(URL(fileURLWithPath: packageInfoPath)))
+                #expect(try await fileSystem.exists(URL(fileURLWithPath: packageInfoPath).absolutePath))
             }
         }
     }
@@ -254,8 +249,7 @@ struct PackageInfoCacheTests {
 
             let index = try #require(
                 JSONSerialization.jsonObject(
-                    with: try await AsyncFileSystem.readData(
-                        from: cacheDir.appendingPathComponent("index.json")))
+                    with: try await fileSystem.readFile(at: cacheDir.appendingPathComponent("index.json").absolutePath))
                     as? [String: Any])
             let packages = try #require(index["packages"] as? [[String: Any]])
 
@@ -267,8 +261,8 @@ struct PackageInfoCacheTests {
     }
 
     private func writeInvalidManifest(packageDir: URL) async throws {
-        try await AsyncFileSystem.createDirectory(at: packageDir, withIntermediateDirectories: true)
-        try await AsyncFileSystem.atomicWrite(
+        try await fileSystem.makeDirectory(at: packageDir.absolutePath, options: [.createTargetParentDirectories])
+        try await fileSystem.atomicWrite(
             "not a valid Swift package manifest",
             to: packageDir.appendingPathComponent("Package.swift"))
     }

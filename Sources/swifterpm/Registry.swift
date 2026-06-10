@@ -42,10 +42,10 @@ struct RegistryConfig: Sendable {
     }
 
     private mutating func mergeFile(_ path: URL) async throws {
-        guard try await AsyncFileSystem.exists(path) else { return }
+        guard try await fileSystem.exists(path.absolutePath) else { return }
         guard
             let root = try JSONSerialization.jsonObject(
-                with: try await AsyncFileSystem.readData(from: path)) as? [String: Any],
+                with: try await fileSystem.readFile(at: path.absolutePath)) as? [String: Any],
             let registries = root["registries"] as? [String: Any]
         else {
             return
@@ -86,7 +86,7 @@ struct RegistryConfig: Sendable {
     }
 
     private static func registriesPath(fromConfigPath configPath: URL) async throws -> URL {
-        if try await AsyncFileSystem.isRegularFile(configPath) {
+        if try await fileSystem.exists(configPath.absolutePath, isDirectory: false) {
             return configPath
         }
         return configPath.appendingPathComponent("registries.json")
@@ -145,7 +145,7 @@ enum RegistryAuthorization {
 
         if let home = environment["HOME"] {
             let netrcPath = URL(fileURLWithPath: home).appendingPathComponent(".netrc")
-            if let data = try? await AsyncFileSystem.readData(from: netrcPath),
+            if let data = try? await fileSystem.readFile(at: netrcPath.absolutePath),
                let content = String(data: data, encoding: .utf8),
                let credential = RegistryNetrc(content: content).credential(for: url)
             {
@@ -480,7 +480,7 @@ enum RegistryClient {
             let lock = try await cache.lock(namespace: "registry-archives", key: archivePath.path)
             _ = lock
             if try await !validCachedArchive(archivePath, expectedChecksum: expectedChecksum) {
-                try? await AsyncFileSystem.removePath(archivePath)
+                try? await fileSystem.removePath(archivePath)
                 let data = try await fetchRegistryArchive(
                     registryURL: registryURL,
                     identity: identity,
@@ -493,26 +493,26 @@ enum RegistryClient {
                         "\(identity) \(version) checksum mismatch: expected \(expectedChecksum), got \(actual)"
                     )
                 }
-                try await AsyncFileSystem.atomicWrite(data, to: archivePath)
+                try await fileSystem.atomicWrite(data, to: archivePath)
             }
         }
 
         try await SystemProcess.run(
             "/usr/bin/unzip", ["-q", archivePath.path, "-d", destination.path])
-        try await AsyncFileSystem.flattenSingleDirectory(destination)
+        try await fileSystem.flattenSingleDirectory(destination)
     }
 
     private static func validCachedArchive(_ archivePath: URL, expectedChecksum: String)
         async throws -> Bool
     {
-        guard try await AsyncFileSystem.exists(archivePath) else {
+        guard try await fileSystem.exists(archivePath.absolutePath) else {
             return false
         }
         let actual = try Hashing.sha256Hex(fileAt: archivePath)
         if actual.caseInsensitiveCompare(expectedChecksum) == .orderedSame {
             return true
         }
-        try? await AsyncFileSystem.removePath(archivePath)
+        try? await fileSystem.removePath(archivePath)
         return false
     }
 
@@ -638,14 +638,14 @@ enum RegistryClient {
         cache: Cache, registryURL: String, identity: String
     ) async throws -> [RegistryVersion]? {
         let path = cache.registryVersionsPath(registryURL: registryURL, identity: identity)
-        guard try await AsyncFileSystem.exists(path) else { return nil }
-        if let modified = try await AsyncFileSystem.modificationDate(path),
+        guard try await fileSystem.exists(path.absolutePath) else { return nil }
+        if let modified = try await fileSystem.fileMetadata(at: path.absolutePath)?.lastModificationDate,
             Date().timeIntervalSince(modified) > 60 * 60
         {
             return nil
         }
         let cached = try JSONDecoder().decode(
-            RegistryVersionsCache.self, from: try await AsyncFileSystem.readData(from: path))
+            RegistryVersionsCache.self, from: try await fileSystem.readFile(at: path.absolutePath))
         guard cached.registryURL == registryURL, cached.identity == identity else { return nil }
         return cached.versions
     }
@@ -660,7 +660,7 @@ enum RegistryClient {
                 RegistryVersionsCache(
                     registryURL: registryURL, identity: identity, versions: versions))
             + Data("\n".utf8)
-        try await AsyncFileSystem.atomicWrite(
+        try await fileSystem.atomicWrite(
             data, to: cache.registryVersionsPath(registryURL: registryURL, identity: identity))
     }
 }

@@ -20,9 +20,9 @@ struct Cache: Sendable {
             "artifacts",
         ]
         try await ConcurrentTasks.forEach(topLevelPaths) { path in
-            try await AsyncFileSystem.createDirectory(
-                at: cacheRoot.appendingPathComponent(path),
-                withIntermediateDirectories: true
+            try await fileSystem.makeDirectory(
+                at: cacheRoot.appendingPathComponent(path).absolutePath,
+                options: [.createTargetParentDirectories]
             )
         }
         try await ConcurrentTasks.forEach([
@@ -31,9 +31,8 @@ struct Cache: Sendable {
             "metadata/registries",
             "virtual/checkouts",
         ]) { path in
-            try await AsyncFileSystem.createDirectory(
-                at: cacheRoot.appendingPathComponent(path),
-                withIntermediateDirectories: false
+            try await fileSystem.makeDirectory(
+                at: cacheRoot.appendingPathComponent(path).absolutePath
             )
         }
     }

@@ -80,21 +80,21 @@ enum ManifestLoader {
         let result = try await SystemProcess.run(
             "/usr/bin/swift", args, workingDirectory: packageDir
         )
-        try? await AsyncFileSystem.atomicWrite(result.stdout, to: cacheFilePath(packageDir: packageDir))
+        try? await fileSystem.atomicWrite(result.stdout, to: cacheFilePath(packageDir: packageDir))
         return result.stdout
     }
 
     private static func readCachedManifest(packageDir: URL) async throws -> Data? {
         let cache = cacheFilePath(packageDir: packageDir)
         let manifest = packageDir.appendingPathComponent("Package.swift")
-        guard try await AsyncFileSystem.exists(cache) else { return nil }
-        guard let cacheDate = try await AsyncFileSystem.modificationDate(cache),
-              let manifestDate = try await AsyncFileSystem.modificationDate(manifest),
+        guard try await fileSystem.exists(cache.absolutePath) else { return nil }
+        guard let cacheDate = try await fileSystem.fileMetadata(at: cache.absolutePath)?.lastModificationDate,
+              let manifestDate = try await fileSystem.fileMetadata(at: manifest.absolutePath)?.lastModificationDate,
               cacheDate >= manifestDate
         else {
             return nil
         }
-        return try await AsyncFileSystem.readData(from: cache)
+        return try await fileSystem.readFile(at: cache.absolutePath)
     }
 }
 

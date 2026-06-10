@@ -82,10 +82,9 @@ struct CLITests {
     {
         try await withTemporaryDirectory { root in
             let workspace = root.appendingPathComponent("workspace")
-            try await AsyncFileSystem.createDirectory(
-                at: workspace, withIntermediateDirectories: true)
+            try await fileSystem.makeDirectory(at: workspace.absolutePath, options: [.createTargetParentDirectories])
 
-            let originalDirectory = try await AsyncFileSystem.currentDirectoryPath()
+            let originalDirectory = try await fileSystem.currentWorkingDirectory().pathString
             let cli = try CLIParser.parse([
                 "--chdir", workspace.path,
                 "restore",
@@ -103,7 +102,7 @@ struct CLITests {
                 resolver.resolve(options.packageDir).path
                     == resolvedWorkspace.appendingPathComponent("Package").path)
             #expect(resolver.resolve(CLIPath("/tmp/cache")).path == "/tmp/cache")
-            #expect(try await AsyncFileSystem.currentDirectoryPath() == originalDirectory)
+            #expect(try await fileSystem.currentWorkingDirectory().pathString == originalDirectory)
         }
     }
 

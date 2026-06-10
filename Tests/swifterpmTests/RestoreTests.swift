@@ -17,10 +17,9 @@ struct RestoreTests {
                 quiet: true
             )
 
-            #expect(try await AsyncFileSystem.exists(scratch.appendingPathComponent("checkouts")))
+            #expect(try await fileSystem.exists(scratch.appendingPathComponent("checkouts").absolutePath))
             #expect(
-                try await AsyncFileSystem.exists(
-                    scratch.appendingPathComponent("registry/downloads")))
+                try await fileSystem.exists(scratch.appendingPathComponent("registry/downloads").absolutePath))
         }
     }
 
@@ -59,7 +58,7 @@ struct RestoreTests {
             let statePath = scratch.appendingPathComponent("workspace-state.json")
             let state = try #require(
                 try JSONSerialization.jsonObject(
-                    with: await AsyncFileSystem.readData(from: statePath))
+                    with: await fileSystem.readFile(at: statePath.absolutePath))
                     as? [String: Any])
             let object = try #require(state["object"] as? [String: Any])
             let dependencies = try #require(object["dependencies"] as? [[String: Any]])
@@ -80,8 +79,8 @@ struct RestoreTests {
             let scratch = root.appendingPathComponent("scratch")
             let statePath = scratch.appendingPathComponent("workspace-state.json")
             try await writeCachedManifest(emptyManifest(), packageDir: package)
-            try await AsyncFileSystem.createDirectory(at: scratch, withIntermediateDirectories: true)
-            try await AsyncFileSystem.atomicWrite(
+            try await fileSystem.makeDirectory(at: scratch.absolutePath, options: [.createTargetParentDirectories])
+            try await fileSystem.atomicWrite(
                 JSONFormatter.prettyData([
                     "object": [
                         "artifacts": [],
@@ -113,7 +112,7 @@ struct RestoreTests {
 
             let state = try #require(
                 try JSONSerialization.jsonObject(
-                    with: await AsyncFileSystem.readData(from: statePath))
+                    with: await fileSystem.readFile(at: statePath.absolutePath))
                     as? [String: Any])
             let object = try #require(state["object"] as? [String: Any])
             let prebuilts = try #require(object["prebuilts"] as? [[String: Any]])
@@ -170,7 +169,7 @@ struct RestoreTests {
             let statePath = scratch.appendingPathComponent("workspace-state.json")
             let state = try #require(
                 try JSONSerialization.jsonObject(
-                    with: await AsyncFileSystem.readData(from: statePath))
+                    with: await fileSystem.readFile(at: statePath.absolutePath))
                     as? [String: Any])
             let object = try #require(state["object"] as? [String: Any])
             let dependencies = try #require(object["dependencies"] as? [[String: Any]])
@@ -226,7 +225,7 @@ struct RestoreTests {
             let statePath = scratch.appendingPathComponent("workspace-state.json")
             let state = try #require(
                 try JSONSerialization.jsonObject(
-                    with: await AsyncFileSystem.readData(from: statePath))
+                    with: await fileSystem.readFile(at: statePath.absolutePath))
                     as? [String: Any])
             let object = try #require(state["object"] as? [String: Any])
             let dependencies = try #require(object["dependencies"] as? [[String: Any]])
@@ -255,11 +254,8 @@ struct RestoreTests {
             let package = root.appendingPathComponent("Package")
             let scratch = root.appendingPathComponent("scratch")
             let framework = package.appendingPathComponent("XCFrameworks/Foo.xcframework")
-            try await AsyncFileSystem.createDirectory(
-                at: framework,
-                withIntermediateDirectories: true
-            )
-            try await AsyncFileSystem.atomicWrite(
+            try await fileSystem.makeDirectory(at: framework.absolutePath, options: [.createTargetParentDirectories])
+            try await fileSystem.atomicWrite(
                 validXCFrameworkInfoPlist(),
                 to: framework.appendingPathComponent("Info.plist")
             )
@@ -277,7 +273,7 @@ struct RestoreTests {
             let statePath = scratch.appendingPathComponent("workspace-state.json")
             let state = try #require(
                 try JSONSerialization.jsonObject(
-                    with: await AsyncFileSystem.readData(from: statePath))
+                    with: await fileSystem.readFile(at: statePath.absolutePath))
                     as? [String: Any])
             let object = try #require(state["object"] as? [String: Any])
             let artifacts = try #require(object["artifacts"] as? [[String: Any]])
@@ -312,14 +308,11 @@ struct RestoreTests {
             let artifactURL = "https://example.com/Foo.zip"
 
             let zipPath = try await makeXCFrameworkZip(root: root, targetName: "Foo")
-            let checksum = try Hashing.sha256Hex(await AsyncFileSystem.readData(from: zipPath))
+            let checksum = try Hashing.sha256Hex(await fileSystem.readFile(at: zipPath.absolutePath))
             let archivePath = cache.binaryArtifactArchivePath(url: artifactURL, checksum: checksum)
-            try await AsyncFileSystem.createDirectory(
-                at: archivePath.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try await AsyncFileSystem.writeData(
-                await AsyncFileSystem.readData(from: zipPath),
+            try await fileSystem.makeDirectory(at: archivePath.deletingLastPathComponent().absolutePath, options: [.createTargetParentDirectories])
+            try await fileSystem.write(
+                await fileSystem.readFile(at: zipPath.absolutePath),
                 to: archivePath
             )
 
@@ -345,7 +338,7 @@ struct RestoreTests {
             let statePath = scratch.appendingPathComponent("workspace-state.json")
             let state = try #require(
                 try JSONSerialization.jsonObject(
-                    with: await AsyncFileSystem.readData(from: statePath))
+                    with: await fileSystem.readFile(at: statePath.absolutePath))
                     as? [String: Any])
             let object = try #require(state["object"] as? [String: Any])
             let artifacts = try #require(object["artifacts"] as? [[String: Any]])
@@ -363,10 +356,9 @@ struct RestoreTests {
             #expect(source["type"] as? String == "remote")
             #expect(source["url"] as? String == artifactURL)
             #expect(source["checksum"] as? String == checksum)
-            #expect(try await AsyncFileSystem.exists(artifactPath))
+            #expect(try await fileSystem.exists(artifactPath.absolutePath))
             #expect(
-                try await !AsyncFileSystem.exists(
-                    scratch.appendingPathComponent("artifacts/binary")))
+                try await !fileSystem.exists(scratch.appendingPathComponent("artifacts/binary").absolutePath))
         }
     }
 
@@ -390,13 +382,10 @@ struct RestoreTests {
             )
             let zipPath = try await makeXCFrameworkZip(root: root, targetName: "Foo")
             let artifactURL = zipPath.absoluteString
-            let checksum = try Hashing.sha256Hex(await AsyncFileSystem.readData(from: zipPath))
+            let checksum = try Hashing.sha256Hex(await fileSystem.readFile(at: zipPath.absolutePath))
             let archivePath = cache.binaryArtifactArchivePath(url: artifactURL, checksum: checksum)
-            try await AsyncFileSystem.createDirectory(
-                at: archivePath.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try await AsyncFileSystem.writeData(
+            try await fileSystem.makeDirectory(at: archivePath.deletingLastPathComponent().absolutePath, options: [.createTargetParentDirectories])
+            try await fileSystem.write(
                 Data("stale archive".utf8),
                 to: archivePath
             )
@@ -419,9 +408,9 @@ struct RestoreTests {
 
             let artifactPath = scratch
                 .appendingPathComponent("swifterpm/artifacts/binary/Foo/Foo.xcframework")
-            #expect(try await AsyncFileSystem.exists(archivePath))
+            #expect(try await fileSystem.exists(archivePath.absolutePath))
             #expect(try Hashing.sha256Hex(fileAt: archivePath) == checksum)
-            #expect(try await AsyncFileSystem.exists(artifactPath))
+            #expect(try await fileSystem.exists(artifactPath.absolutePath))
         }
     }
 
@@ -432,13 +421,13 @@ struct RestoreTests {
             let scratch = root.appendingPathComponent("scratch")
             let cache = try await Cache(root: root.appendingPathComponent("cache"))
             let zipPath = try await makeXCFrameworkZip(root: root, targetName: "Foo")
-            let checksum = try Hashing.sha256Hex(await AsyncFileSystem.readData(from: zipPath))
+            let checksum = try Hashing.sha256Hex(await fileSystem.readFile(at: zipPath.absolutePath))
             try await writeCachedManifest(
                 localBinaryTargetManifest(name: "Foo", path: "Foo.zip"),
                 packageDir: package
             )
-            try await AsyncFileSystem.writeData(
-                await AsyncFileSystem.readData(from: zipPath),
+            try await fileSystem.write(
+                await fileSystem.readFile(at: zipPath.absolutePath),
                 to: package.appendingPathComponent("Foo.zip")
             )
 
@@ -468,16 +457,16 @@ struct RestoreTests {
                 targetName: "Foo",
                 checksum: checksum
             )
-            #expect(try await AsyncFileSystem.exists(artifactPath))
-            #expect(try await AsyncFileSystem.exists(cachedArtifact))
+            #expect(try await fileSystem.exists(artifactPath.absolutePath))
+            #expect(try await fileSystem.exists(cachedArtifact.absolutePath))
         }
     }
 
     private func makeXCFrameworkZip(root: URL, targetName: String) async throws -> URL {
         let archiveRoot = root.appendingPathComponent("archive")
         let framework = archiveRoot.appendingPathComponent("\(targetName).xcframework")
-        try await AsyncFileSystem.createDirectory(at: framework, withIntermediateDirectories: true)
-        try await AsyncFileSystem.atomicWrite(
+        try await fileSystem.makeDirectory(at: framework.absolutePath, options: [.createTargetParentDirectories])
+        try await fileSystem.atomicWrite(
             validXCFrameworkInfoPlist(),
             to: framework.appendingPathComponent("Info.plist")
         )

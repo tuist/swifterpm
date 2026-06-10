@@ -163,14 +163,14 @@ enum RemoteMetadata {
         -> [RemoteVersion]?
     {
         let path = cache.remoteVersionsPath(location: location)
-        guard try await AsyncFileSystem.exists(path) else { return nil }
-        if let modified = try await AsyncFileSystem.modificationDate(path),
+        guard try await fileSystem.exists(path.absolutePath) else { return nil }
+        if let modified = try await fileSystem.fileMetadata(at: path.absolutePath)?.lastModificationDate,
             Date().timeIntervalSince(modified) > 60 * 60
         {
             return nil
         }
         let cached = try JSONDecoder().decode(
-            RemoteVersionsCache.self, from: try await AsyncFileSystem.readData(from: path))
+            RemoteVersionsCache.self, from: try await fileSystem.readFile(at: path.absolutePath))
         guard cached.location == location else { return nil }
         return cached.versions
     }
@@ -183,7 +183,7 @@ enum RemoteMetadata {
         let data =
             try encoder.encode(RemoteVersionsCache(location: location, versions: versions))
             + Data("\n".utf8)
-        try await AsyncFileSystem.atomicWrite(
+        try await fileSystem.atomicWrite(
             data, to: cache.remoteVersionsPath(location: location))
     }
 }
