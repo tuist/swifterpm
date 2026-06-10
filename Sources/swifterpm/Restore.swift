@@ -22,7 +22,7 @@ enum WorkspaceRestorer {
         cache: Cache,
         registryConfig: RegistryConfig,
         resolved: ResolvedPins,
-        quiet: Bool,
+        progress: RestoreProgressReporter?,
         disableSandbox: Bool = false
     ) async throws {
         let scratchLock = try await PathLock.acquire(
@@ -61,21 +61,23 @@ enum WorkspaceRestorer {
             cache: cache,
             resolved: resolved,
             disableSandbox: disableSandbox,
-            quiet: quiet
+            progress: progress
         )
 
-        guard !quiet else { return }
+        guard let progress else { return }
         for (identity, source) in sourceResults {
-            print("restored \(identity) -> \(source.path)")
+            progress.restoredPackage(identity: identity, path: source.path)
         }
         for (identity, source) in registryResults {
-            print("restored \(identity) -> \(source.path)")
+            progress.restoredPackage(identity: identity, path: source.path)
         }
-        print("restored \(sourceResults.count) source-control packages into \(checkouts.path)")
-        print("restored \(registryResults.count) registry packages into \(registryDownloads.path)")
-        if skipped > 0 {
-            print("skipped \(skipped) unsupported pins")
-        }
+        progress.restoreSummary(
+            sourceCount: sourceResults.count,
+            sourcePath: checkouts.path,
+            registryCount: registryResults.count,
+            registryPath: registryDownloads.path,
+            skipped: skipped
+        )
     }
 
     private static func restoreBinaryArtifacts(
@@ -84,7 +86,7 @@ enum WorkspaceRestorer {
         cache: Cache,
         resolved: ResolvedPins,
         disableSandbox: Bool,
-        quiet: Bool
+        progress: RestoreProgressReporter?
     ) async throws {
         let contexts = try await packageContexts(
             packageDir: packageDir,
@@ -102,9 +104,7 @@ enum WorkspaceRestorer {
         }
         let total = targetGroups.reduce(0) { $0 + $1.count }
         guard total > 0 else { return }
-        if !quiet {
-            print("restoring \(total) binary artifact\(total == 1 ? "" : "s")")
-        }
+        progress?.restoringBinaryArtifacts(count: total)
         // Keep the original per-context fan-out: downloads across packages run
         // concurrently, and the targets within each package run concurrently
         // too. Flattening into a single pool would have capped total in-flight
@@ -117,7 +117,7 @@ enum WorkspaceRestorer {
                     context: context,
                     scratchDir: scratchDir,
                     cache: cache,
-                    quiet: quiet
+                    progress: progress
                 )
             }
         }
@@ -128,7 +128,7 @@ enum WorkspaceRestorer {
         context: PackageContext,
         scratchDir: URL,
         cache: Cache,
-        quiet: Bool
+        progress: RestoreProgressReporter?
     ) async throws {
         switch target.source {
         case let .remote(url, checksum):
@@ -149,7 +149,7 @@ enum WorkspaceRestorer {
                         checksum: checksum,
                         cache: cache,
                         destination: cachedArtifact,
-                        quiet: quiet
+                        progress: progress
                     )
                 }
             }
@@ -164,9 +164,8 @@ enum WorkspaceRestorer {
                 destination: scratchArtifact
             )
 
-            if !quiet {
-                print("restored \(identity).\(target.name) -> \(cachedArtifact.path)")
-            }
+            progress?.restoredBinaryArtifact(
+                identity: identity, target: target.name, path: cachedArtifact.path)
         case let .local(path):
             let artifactPath = binaryTargetPath(
                 path,
@@ -196,9 +195,8 @@ enum WorkspaceRestorer {
                 source: cachedArtifact,
                 destination: scratchArtifact
             )
-            if !quiet {
-                print("restored \(identity).\(target.name) -> \(cachedArtifact.path)")
-            }
+            progress?.restoredBinaryArtifact(
+                identity: identity, target: target.name, path: cachedArtifact.path)
         }
     }
 
@@ -221,7 +219,7 @@ enum WorkspaceRestorer {
         checksum: String,
         cache: Cache,
         destination: URL,
-        quiet: Bool
+        progress: RestoreProgressReporter?
     ) async throws {
         let archivePath = cache.binaryArtifactArchivePath(
             url: url,
@@ -239,9 +237,7 @@ enum WorkspaceRestorer {
             ) {
                 try? await fileSystem.removePath(archivePath)
                 let remoteURL = try artifactURL(url)
-                if !quiet {
-                    print("downloading \(identity).\(targetName)")
-                }
+                progress?.downloadingBinaryArtifact(identity: identity, target: targetName)
                 try await HTTPClient.download(
                     url: remoteURL,
                     destination: archivePath,

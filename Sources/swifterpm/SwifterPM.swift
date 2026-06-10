@@ -134,7 +134,7 @@ public struct SwifterPM: Sendable {
             cache: cache,
             registryConfig: registryConfig,
             resolved: resolved,
-            quiet: request.quiet,
+            progress: request.quiet ? nil : RestoreProgressReporter(),
             disableSandbox: request.disableSandbox
         )
         try await maybeWritePackageInfoCache(
@@ -190,7 +190,7 @@ public struct SwifterPM: Sendable {
                 cache: cache,
                 registryConfig: registryConfig,
                 resolved: resolved,
-                quiet: request.quiet,
+                progress: request.quiet ? nil : RestoreProgressReporter(),
                 disableSandbox: request.disableSandbox
             )
             try await maybeWritePackageInfoCache(

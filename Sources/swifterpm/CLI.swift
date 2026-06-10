@@ -495,7 +495,7 @@ enum CLIRunner {
             try await WorkspaceRestorer.restorePackage(
                 scratchDir: scratch, packageDir: package, cache: cache, registryConfig: registryConfig,
                 resolved: resolved,
-                quiet: cli.quiet,
+                progress: cli.quiet ? nil : RestoreProgressReporter(),
                 disableSandbox: cli.disableSandbox)
             try await maybeWritePackageInfoCache(
                 cli: cli, paths: paths, package: package, scratch: scratch, resolved: resolved)
@@ -547,7 +547,7 @@ enum CLIRunner {
             try await WorkspaceRestorer.restorePackage(
                 scratchDir: scratch, packageDir: package, cache: cache, registryConfig: registryConfig,
                 resolved: resolved,
-                quiet: cli.quiet,
+                progress: cli.quiet ? nil : RestoreProgressReporter(),
                 disableSandbox: cli.disableSandbox)
             try await maybeWritePackageInfoCache(
                 cli: cli, paths: paths, package: package, scratch: scratch, resolved: resolved)
