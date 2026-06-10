@@ -13,6 +13,21 @@ Review Swift changes for SwifterPM with the same standards as a maintainer revie
 - For e2e tests, scenarios should live under fixture folders and be copied into temporary folders before execution.
 - Keep Bazel and SwiftPM dependency declarations aligned when new Swift package dependencies are introduced.
 
+## What NOT to Flag
+
+- Do not suggest cleanup of `flock` lock files that are intentionally left as stable lock paths; these are filesystem sentinels, not leaks.
+- Do not critique ShellSpec RETURN trap patterns used in e2e tests; this is the standard pattern in the codebase.
+- Do not flag in-memory cache key choices (like using full paths) when the cache is scoped to a single resolver run, not cross-machine.
+- Do not flag expected SwiftPM semantics as bugs (e.g., non-SemVer Git tags being ignored during version resolution).
+- Do not suggest micro-optimizations or style changes unless they represent actual behavioral risks.
+
+## Severity Guidelines
+
+- Use `high` for data races, crashes, security issues, or resolution correctness bugs.
+- Use `medium` for thread-safety concerns, API contract violations, or observable behavioral changes.
+- Use `low` sparingly; only for minor cleanup issues that are clearly bugs, not preferences or speculative improvements.
+- If a finding feels like a preference or requires domain knowledge to verify, it likely should not be reported.
+
 ## Review Style
 
 - Lead with concrete bugs and behavioral risks. Avoid speculative style comments.
