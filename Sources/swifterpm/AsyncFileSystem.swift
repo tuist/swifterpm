@@ -5,10 +5,23 @@ enum AsyncFileSystem {
     private static let fileSystem = FileSystem.shared
 
     static func createDirectory(at url: URL, withIntermediateDirectories: Bool) async throws {
-        try await fileSystem.createDirectory(
-            at: filePath(url),
-            withIntermediateDirectories: withIntermediateDirectories
-        )
+        // NIOFileSystem's createDirectory(withIntermediateDirectories: true) is not race-safe:
+        // its two-phase walk-up/reconstruct algorithm can mkdir an intermediate component
+        // that another concurrent task has already created, surfacing EEXIST. Treat that
+        // outcome as success when the target ends up as a directory.
+        do {
+            try await fileSystem.createDirectory(
+                at: filePath(url),
+                withIntermediateDirectories: withIntermediateDirectories
+            )
+        } catch let error as FileSystemError
+            where error.code == .fileAlreadyExists && withIntermediateDirectories
+        {
+            if try await isDirectory(url) {
+                return
+            }
+            throw error
+        }
     }
 
     static func exists(_ url: URL) async throws -> Bool {

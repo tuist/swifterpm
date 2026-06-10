@@ -23,6 +23,26 @@ struct AsyncFileSystemTests {
     }
 
     @Test
+    func createDirectoryWithIntermediatesIsRaceSafeAcrossConcurrentTasks() async throws {
+        try await withTemporaryDirectory { root in
+            let shared = root.appendingPathComponent("a/b/c/d")
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                for index in 0..<32 {
+                    let target = shared.appendingPathComponent("leaf-\(index)")
+                    group.addTask {
+                        try await AsyncFileSystem.createDirectory(
+                            at: target.deletingLastPathComponent(),
+                            withIntermediateDirectories: true
+                        )
+                    }
+                }
+                try await group.waitForAll()
+            }
+            #expect(try await AsyncFileSystem.isDirectory(shared))
+        }
+    }
+
+    @Test
     func createsSymlinksAndReportsCurrentDirectory() async throws {
         try await withTemporaryDirectory { root in
             let target = root.appendingPathComponent("target.txt")
