@@ -20,43 +20,24 @@ final class ResolutionProgressReporter: @unchecked Sendable {
         var discoveredPackages = 0
         var lastProgressAt = Date.distantPast
         var lastProgressLine: String?
-        var renderedInteractiveProgress = false
     }
 
     private let enabled: Bool
-    private let interactive: Bool
     private let minimumInterval: TimeInterval
-    private let writeOutput: @Sendable (String) -> Void
+    private let writeLine: @Sendable (String) -> Void
     private let lock = NSLock()
     private var state: State?
 
     init(
         enabled: Bool = true,
-        interactive: Bool = TerminalStyle.colorEnabled,
         minimumInterval: TimeInterval = 2,
-        writeOutput: @escaping @Sendable (String) -> Void = { output in
-            ResolutionProgressReporter.writeStderr(output)
+        writeLine: @escaping @Sendable (String) -> Void = { line in
+            ResolutionProgressReporter.writeStdout(line + "\n")
         }
     ) {
         self.enabled = enabled
-        self.interactive = interactive
         self.minimumInterval = minimumInterval
-        self.writeOutput = writeOutput
-    }
-
-    init(
-        enabled: Bool = true,
-        minimumInterval: TimeInterval,
-        writeLine: @escaping @Sendable (String) -> Void
-    ) {
-        self.enabled = enabled
-        self.interactive = false
-        self.minimumInterval = minimumInterval
-        self.writeOutput = { output in
-            for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
-                writeLine(String(line))
-            }
-        }
+        self.writeLine = writeLine
     }
 
     func started(rootVersionedDependencies: Int, fixedDependencies: Int) {
@@ -127,11 +108,7 @@ final class ResolutionProgressReporter: @unchecked Sendable {
                 Self.formatDuration(Date().timeIntervalSince(current.startedAt)))
             let summary =
                 "\(TerminalStyle.green("✓")) resolved \(TerminalStyle.bold("\(pinCount)")) package\(pinCount == 1 ? "" : "s") in \(elapsed)"
-            if interactive, current.renderedInteractiveProgress {
-                writeOutput("\r\u{001B}[2K\(summary)\n")
-            } else {
-                writeLine(summary)
-            }
+            writeLine(summary)
             state = nil
         }
     }
@@ -152,12 +129,7 @@ final class ResolutionProgressReporter: @unchecked Sendable {
             }
             current.lastProgressAt = now
             current.lastProgressLine = line
-            if interactive {
-                writeOutput("\r\u{001B}[2K\(line)")
-                current.renderedInteractiveProgress = true
-            } else {
-                writeLine(line)
-            }
+            writeLine(line)
             state = current
         }
     }
@@ -190,12 +162,8 @@ final class ResolutionProgressReporter: @unchecked Sendable {
         return try body()
     }
 
-    private static func writeStderr(_ output: String) {
-        FileHandle.standardError.write(Data(output.utf8))
-    }
-
-    private func writeLine(_ line: String) {
-        writeOutput(line + "\n")
+    private static func writeStdout(_ output: String) {
+        FileHandle.standardOutput.write(Data(output.utf8))
     }
 
     private static func formatDuration(_ seconds: TimeInterval) -> String {
@@ -243,7 +211,7 @@ private enum TerminalStyle {
         if env["CLICOLOR"] == "0" {
             return false
         }
-        return isatty(FileHandle.standardError.fileDescriptor) == 1
+        return isatty(FileHandle.standardOutput.fileDescriptor) == 1
     }
 
     private static func truthy(_ value: String) -> Bool {
