@@ -183,12 +183,19 @@ public struct SwifterPM: Sendable {
             resolved = existing
         } else {
             let progress = request.quiet ? nil : ResolutionProgressReporter()
+            // Mirror SwiftPM: `resolve` seeds the solver with the existing
+            // Package.resolved (even a stale one) so only pins that no longer
+            // satisfy the manifest change; `update` resolves from scratch.
+            let existingPins = preferResolvedFile
+                ? ((try? await ResolvedFile.read(packageDir: package))?.pins ?? [])
+                : []
             let fresh = try await PackageResolver.resolve(
                 packageDir: package,
                 cache: cache,
                 registryConfig: registryConfig,
                 disableSandbox: request.disableSandbox,
                 scmToRegistryTransformation: request.scmToRegistryTransformation,
+                existingPins: existingPins,
                 progress: progress
             )
             if request.writeResolvedFile {

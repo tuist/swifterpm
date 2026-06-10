@@ -7,6 +7,7 @@ enum PackageResolver {
         registryConfig: RegistryConfig,
         disableSandbox: Bool,
         scmToRegistryTransformation: SCMToRegistryTransformation = .disabled,
+        existingPins: [ResolvedPin] = [],
         progress: ResolutionProgressReporter? = nil
     ) async throws -> ResolvedPins {
         let manifest = try await ManifestLoader.dumpPackage(
@@ -41,6 +42,7 @@ enum PackageResolver {
 
         var pins = try await SwiftPMResolverBridge.resolve(
             dependencies: dependencies,
+            existingPins: existingPins,
             cache: cache,
             registryConfig: registryConfig,
             disableSandbox: disableSandbox,
@@ -122,20 +124,6 @@ enum PackageResolver {
             }
         }
         return order.compactMap { chosen[$0] }
-    }
-
-    private static func canonicalSourceControlLocation(_ location: String) -> String {
-        var value = location
-        while value.hasSuffix("/") {
-            value.removeLast()
-        }
-        if value.hasSuffix(".git") {
-            value = String(value.dropLast(4))
-        }
-        if let repo = try? GitHubRepo(location: value) {
-            return "https://github.com/\(repo.owner.lowercased())/\(repo.repo.lowercased())"
-        }
-        return value
     }
 
     static func localSourceControlPackageLocation(_ location: String) async throws -> URL? {

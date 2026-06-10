@@ -481,6 +481,7 @@ private final class RegistryFallbackLocations: @unchecked Sendable {
 enum SwiftPMResolverBridge {
     static func resolve(
         dependencies: [ManifestDependency],
+        existingPins: [ResolvedPin] = [],
         cache: Cache,
         registryConfig: RegistryConfig,
         disableSandbox: Bool,
@@ -518,7 +519,7 @@ enum SwiftPMResolverBridge {
 
         let resolver = PubGrubDependencyResolver(
             provider: provider,
-            resolvedPackages: [:],
+            resolvedPackages: resolvedPackagesStore(existingPins),
             skipDependenciesUpdates: true,
             prefetchBasedOnResolvedFile: false,
             observabilityScope: ObservabilitySystem.NOOP
@@ -545,6 +546,59 @@ enum SwiftPMResolverBridge {
     }
 }
 
+func resolvedPackagesStore(_ pins: [ResolvedPin]) -> ResolvedPackagesStore.ResolvedPackages {
+    var store: ResolvedPackagesStore.ResolvedPackages = [:]
+    for pin in pins {
+        guard let reference = try? storedPackageReference(for: pin),
+              let state = storedResolutionState(for: pin)
+        else { continue }
+        store[reference.identity] = ResolvedPackagesStore.ResolvedPackage(
+            packageRef: reference,
+            state: state,
+            originalScmUrl: nil
+        )
+    }
+    return store
+}
+
+func storedPackageReference(for pin: ResolvedPin) throws -> PackageReference {
+    let identity = PackageIdentity.plain(pin.identity)
+    if PinKind.isRegistry(pin.kind) {
+        return .registry(identity: identity)
+    }
+    if pin.location.hasPrefix("/") {
+        return try .localSourceControl(
+            identity: identity,
+            path: AbsolutePath(validating: pin.location)
+        )
+    }
+    if let url = Foundation.URL(string: pin.location), url.isFileURL {
+        return try .localSourceControl(
+            identity: identity,
+            path: AbsolutePath(validating: url.path)
+        )
+    }
+    return .remoteSourceControl(
+        identity: identity,
+        url: SourceControlURL(pin.location)
+    )
+}
+
+func storedResolutionState(for pin: ResolvedPin) -> ResolvedPackagesStore.ResolutionState? {
+    if let branch = pin.state.branch, let revision = pin.state.revision {
+        return .branch(name: branch, revision: revision)
+    }
+    if let version = pin.state.version,
+       let parsed = try? SwiftPMVersion(versionString: version)
+    {
+        return .version(parsed, revision: pin.state.revision)
+    }
+    if let revision = pin.state.revision {
+        return .revision(revision)
+    }
+    return nil
+}
+
 private func swiftPMPackageRequirement(for requirement: Requirement) throws -> PackageRequirement {
     switch requirement {
     case .exact(let version):
@@ -558,7 +612,7 @@ private func swiftPMPackageRequirement(for requirement: Requirement) throws -> P
     }
 }
 
-private func swiftPMPackageReference(for dependency: ManifestDependency) throws -> PackageReference {
+func swiftPMPackageReference(for dependency: ManifestDependency) throws -> PackageReference {
     let identity = PackageIdentity.plain(dependency.identity)
     switch dependency.kind {
     case .registry:
