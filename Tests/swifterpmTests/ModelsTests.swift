@@ -103,6 +103,52 @@ struct ModelsTests {
     }
 
     @Test
+    func writePreservesDeclaredLocationsAndSkipsIdenticalRewrites() async throws {
+        try await withTemporaryDirectory { root in
+            try await writeMinimalPackageManifest(at: root, name: "Fixture")
+            // Locations must be persisted exactly as declared in manifests:
+            // ssh form, mixed case, and the .git suffix all stay untouched so
+            // Package.resolved stays interchangeable with SwiftPM's output.
+            let locations = [
+                "git@github.com:riversidefm/Riverside-Mobile-Shared.git",
+                "https://github.com/openid/AppAuth-iOS.git",
+                "https://github.com/jpsim/Yams",
+            ]
+            let resolved = try ResolvedPins(
+                originHash: await ResolvedFile.packageOriginHash(packageDir: root),
+                pins: locations.enumerated().map { index, location in
+                    ResolvedPin(
+                        identity: "dependency-\(index)",
+                        kind: "remoteSourceControl",
+                        location: location,
+                        state: ResolvedState(
+                            branch: nil, revision: "abcdef123456", version: "1.0.0"
+                        )
+                    )
+                },
+                version: 3
+            )
+
+            try await ResolvedFile.write(packageDir: root, resolved: resolved)
+            let resolvedFilePath = try root.appendingPathComponent("Package.resolved").absolutePath
+            let rawData = try await fileSystem.readFile(at: resolvedFilePath)
+            let rawContents = try #require(String(data: rawData, encoding: .utf8))
+            for location in locations {
+                #expect(rawContents.contains("\"\(location)\""))
+            }
+
+            // Rewriting unchanged content must leave the file untouched.
+            let modificationDate = try await fileSystem.fileMetadata(at: resolvedFilePath)?
+                .lastModificationDate
+            try await ResolvedFile.write(packageDir: root, resolved: resolved)
+            #expect(
+                try await fileSystem.fileMetadata(at: resolvedFilePath)?.lastModificationDate
+                    == modificationDate)
+            #expect(try await fileSystem.readFile(at: resolvedFilePath) == rawData)
+        }
+    }
+
+    @Test
     func readIfCurrentReturnsNilWhenOriginHashDoesNotMatch() async throws {
         try await withTemporaryDirectory { root in
             try await writeMinimalPackageManifest(at: root, name: "Fixture")

@@ -177,6 +177,9 @@ public struct SwifterPM: Sendable {
         } else if preferResolvedFile,
                   let existing = try await ResolvedFile.readIfCurrent(packageDir: package)
         {
+            if request.writeResolvedFile {
+                try await ResolvedFile.write(packageDir: package, resolved: existing)
+            }
             resolved = existing
         } else {
             let progress = request.quiet ? nil : ResolutionProgressReporter()

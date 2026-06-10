@@ -327,7 +327,8 @@ extension PathLock {
 enum JSONFormatter {
     static func prettyData(_ object: Any) throws -> Data {
         let data = try JSONSerialization.data(
-            withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+            withJSONObject: object,
+            options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
         return data + Data("\n".utf8)
     }
 }

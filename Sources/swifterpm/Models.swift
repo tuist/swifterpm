@@ -61,6 +61,12 @@ enum ResolvedFile {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         let data = try encoder.encode(resolved) + Data("\n".utf8)
+        let resolvedPath = try path.absolutePath
+        if try await fileSystem.exists(resolvedPath),
+           try await fileSystem.readFile(at: resolvedPath) == data
+        {
+            return
+        }
         try await fileSystem.atomicWrite(data, to: path)
     }
 

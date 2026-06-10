@@ -537,6 +537,9 @@ enum CLIRunner {
         } else if preferResolvedFile,
                   let existing = try await ResolvedFile.readIfCurrent(packageDir: package)
         {
+            if shouldWrite(write: write, printOnly: printOnly) {
+                try await ResolvedFile.write(packageDir: package, resolved: existing)
+            }
             resolved = existing
         } else {
             let progress = cli.quiet ? nil : ResolutionProgressReporter()
