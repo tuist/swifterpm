@@ -10,16 +10,19 @@ struct SemVer: Hashable, Comparable, CustomStringConvertible, Sendable {
         let withoutBuild = string.split(separator: "+", maxSplits: 1, omittingEmptySubsequences: false)[0]
         let parts = withoutBuild.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
         let core = parts[0].split(separator: ".")
-        guard core.count == 3,
+        // SwiftPM tolerates 1- and 2-component version tags (e.g. swift-subprocess ships `0.4`)
+        // and treats missing components as zero. Mirror that to stay compatible with packages
+        // that pin or expose abbreviated tags.
+        guard (1...3).contains(core.count),
               let major = Int(core[0]),
-              let minor = Int(core[1]),
-              let patch = Int(core[2])
+              core.count < 2 || Int(core[1]) != nil,
+              core.count < 3 || Int(core[2]) != nil
         else {
             throw ToolError.message("invalid semantic version: \(string)")
         }
         self.major = major
-        self.minor = minor
-        self.patch = patch
+        self.minor = core.count >= 2 ? Int(core[1])! : 0
+        self.patch = core.count >= 3 ? Int(core[2])! : 0
         self.prerelease = parts.count > 1 ? String(parts[1]) : ""
     }
 
