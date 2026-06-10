@@ -372,8 +372,8 @@ enum PathCanonicalizer {
             #else
                 let resolved = Darwin.realpath(url.path, &buffer)
             #endif
-            if resolved != nil {
-                return URL(fileURLWithPath: String(cString: buffer))
+            if let resolved, let path = String(validatingCString: resolved) {
+                return URL(fileURLWithPath: path)
             }
             return url.standardizedFileURL
         #endif
