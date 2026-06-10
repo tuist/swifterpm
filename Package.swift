@@ -14,12 +14,13 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser", exact: "1.7.1"),
         .package(url: "https://github.com/apple/swift-crypto.git", exact: "3.15.1"),
-        .package(url: "https://github.com/apple/swift-nio.git", exact: "2.99.0"),
         .package(url: "https://github.com/swiftlang/swift-subprocess.git", exact: "0.4.0"),
         .package(
             url: "https://github.com/swiftlang/swift-package-manager.git",
             revision: "e5ac741fed39ebd16df924d3dbfa904a1c332079"
         ),
+        .package(url: "https://github.com/tuist/FileSystem.git", exact: "0.18.0"),
+        .package(url: "https://github.com/tuist/Path.git", exact: "0.3.8"),
     ],
     targets: [
         .target(
@@ -27,9 +28,10 @@ let package = Package(
             dependencies: [
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux])),
-                .product(name: "_NIOFileSystem", package: "swift-nio"),
                 .product(name: "SwiftPMDataModel-auto", package: "swift-package-manager"),
                 .product(name: "Subprocess", package: "swift-subprocess"),
+                .product(name: "FileSystem", package: "FileSystem"),
+                .product(name: "Path", package: "Path"),
             ],
             path: "Sources/swifterpm"
         ),
