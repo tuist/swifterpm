@@ -23,7 +23,7 @@ struct RegistryTests {
         try await withTemporaryDirectory { root in
             let scope = uniqueRegistryScope()
             let registries = root.appendingPathComponent(".swiftpm/configuration/registries.json")
-            try await AsyncFileSystem.atomicWrite(
+            try await fileSystem.atomicWrite(
                 """
                 {
                   "registries": {
@@ -94,7 +94,7 @@ struct RegistryTests {
     func registryAuthorizationHonorsConfiguredTokenAuthentication() async throws {
         try await withTemporaryDirectory { root in
             let registries = root.appendingPathComponent(".swiftpm/configuration/registries.json")
-            try await AsyncFileSystem.atomicWrite(
+            try await fileSystem.atomicWrite(
                 """
                 {
                   "registries": {

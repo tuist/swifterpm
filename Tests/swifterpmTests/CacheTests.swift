@@ -55,7 +55,7 @@ struct CacheTests {
                 "virtual/checkouts",
                 "artifacts",
             ] {
-                #expect(try await AsyncFileSystem.exists(root.appendingPathComponent(path)))
+                #expect(try await fileSystem.exists(root.appendingPathComponent(path).absolutePath))
             }
         }
     }

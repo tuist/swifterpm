@@ -12,7 +12,8 @@ swift_library(
         "@swift_argument_parser//:ArgumentParser",
         "@swiftpkg_swift_subprocess//:Subprocess",
         "@swiftpkg_swift_package_manager//:SwiftPMDataModel-auto",
-        "@swiftpkg_swift_nio//:_NIOFileSystem",
+        "@swiftpkg_filesystem//:FileSystem",
+        "@swiftpkg_path//:Path",
     ],
     visibility = ["//visibility:public"],
 )
@@ -35,7 +36,8 @@ swift_test(
         ":swifterpm_sources",
         "@swift_argument_parser//:ArgumentParser",
         "@swiftpkg_swift_subprocess//:Subprocess",
-        "@swiftpkg_swift_nio//:_NIOFileSystem",
+        "@swiftpkg_filesystem//:FileSystem",
+        "@swiftpkg_path//:Path",
     ],
 )
 

@@ -15,9 +15,9 @@ struct SupportTests {
     func atomicWriteCreatesParentDirectories() async throws {
         try await withTemporaryDirectory { root in
             let path = root.appendingPathComponent("nested/file.txt")
-            try await AsyncFileSystem.atomicWrite("hello", to: path)
+            try await fileSystem.atomicWrite("hello", to: path)
 
-            let data = try await AsyncFileSystem.readData(from: path)
+            let data = try await fileSystem.readFile(at: path.absolutePath)
             #expect(String(data: data, encoding: .utf8) == "hello")
         }
     }
@@ -46,29 +46,28 @@ struct SupportTests {
         try await withTemporaryDirectory { root in
             let source = root.appendingPathComponent("source")
             let nested = root.appendingPathComponent("outer/nested")
-            try await AsyncFileSystem.createDirectory(at: source, withIntermediateDirectories: true)
-            try await AsyncFileSystem.createDirectory(at: nested, withIntermediateDirectories: true)
-            try await AsyncFileSystem.atomicWrite(
+            try await fileSystem.makeDirectory(at: source.absolutePath, options: [.createTargetParentDirectories])
+            try await fileSystem.makeDirectory(at: nested.absolutePath, options: [.createTargetParentDirectories])
+            try await fileSystem.atomicWrite(
                 "value", to: source.appendingPathComponent("file.txt"))
-            try await AsyncFileSystem.atomicWrite(
+            try await fileSystem.atomicWrite(
                 "nested", to: nested.appendingPathComponent("nested.txt"))
 
-            try await AsyncFileSystem.flattenSingleDirectory(root.appendingPathComponent("outer"))
+            try await fileSystem.flattenSingleDirectory(root.appendingPathComponent("outer"))
             #expect(
-                try await AsyncFileSystem.exists(root.appendingPathComponent("outer/nested.txt")))
+                try await fileSystem.exists(root.appendingPathComponent("outer/nested.txt").absolutePath))
 
             let destination = root.appendingPathComponent("destination")
-            try await AsyncFileSystem.replaceWithSymlinkedDirectory(
+            try await fileSystem.replaceWithSymlinkedDirectory(
                 source: source, destination: destination)
-            #expect(try await AsyncFileSystem.exists(destination))
-            #expect(!(try await AsyncFileSystem.isDirectoryAndNotSymlink(destination)))
+            #expect(try await fileSystem.exists(destination.absolutePath))
+            #expect(!(fileSystem.isDirectoryAndNotSymlink(destination)))
             #expect(
-                try await AsyncFileSystem.exists(destination.appendingPathComponent("file.txt")))
-            let data = try await AsyncFileSystem.readData(
-                from: destination.appendingPathComponent("file.txt"))
+                try await fileSystem.exists(destination.appendingPathComponent("file.txt").absolutePath))
+            let data = try await fileSystem.readFile(at: destination.appendingPathComponent("file.txt").absolutePath)
             #expect(String(data: data, encoding: .utf8) == "value")
             #expect(
-                !(try await AsyncFileSystem.isDirectoryAndNotSymlink(
+                !(fileSystem.isDirectoryAndNotSymlink(
                     destination.appendingPathComponent("file.txt"))))
         }
     }
@@ -80,20 +79,17 @@ struct SupportTests {
                 let source = root.appendingPathComponent("source")
                 let nested = source.appendingPathComponent("nested")
                 let destination = root.appendingPathComponent("destination")
-                try await AsyncFileSystem.createDirectory(
-                    at: nested, withIntermediateDirectories: true)
-                try await AsyncFileSystem.atomicWrite(
+                try await fileSystem.makeDirectory(at: nested.absolutePath, options: [.createTargetParentDirectories])
+                try await fileSystem.atomicWrite(
                     "value", to: nested.appendingPathComponent("file.txt"))
 
-                try await AsyncFileSystem.replaceWithCachedDirectory(
+                try await fileSystem.replaceWithCachedDirectory(
                     source: source, destination: destination)
 
-                #expect(try await AsyncFileSystem.isDirectoryAndNotSymlink(destination))
+                #expect(fileSystem.isDirectoryAndNotSymlink(destination))
                 #expect(
-                    try await AsyncFileSystem.exists(
-                        destination.appendingPathComponent("nested/file.txt")))
-                let data = try await AsyncFileSystem.readData(
-                    from: destination.appendingPathComponent("nested/file.txt"))
+                    try await fileSystem.exists(destination.appendingPathComponent("nested/file.txt").absolutePath))
+                let data = try await fileSystem.readFile(at: destination.appendingPathComponent("nested/file.txt").absolutePath)
                 #expect(String(data: data, encoding: .utf8) == "value")
             }
         }
@@ -118,10 +114,10 @@ struct SupportTests {
     @Test
     func temporaryDirectoryAndFileSafeNameUseScopedPaths() async throws {
         try await withTemporaryDirectory { root in
-            let temp = try await AsyncFileSystem.temporaryDirectory(in: root)
+            let temp = try await fileSystem.temporaryDirectory(in: root)
 
             #expect(temp.path.hasPrefix(root.path))
-            #expect(try await AsyncFileSystem.exists(temp))
+            #expect(try await fileSystem.exists(temp.absolutePath))
             #expect(SafeFileName.make("a/b:c") == "a_b_c")
         }
     }

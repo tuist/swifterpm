@@ -51,9 +51,9 @@ enum PackageInfoCacheWriter {
         _ = scratchLock
         _ = cacheLock
 
-        try await AsyncFileSystem.createDirectory(
-            at: cacheDir.appendingPathComponent("packages"),
-            withIntermediateDirectories: true
+        try await fileSystem.makeDirectory(
+            at: cacheDir.appendingPathComponent("packages").absolutePath,
+            options: [.createTargetParentDirectories]
         )
 
         let rootPath = cacheDir.appendingPathComponent("root.json")
@@ -135,7 +135,7 @@ enum PackageInfoCacheWriter {
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try await AsyncFileSystem.atomicWrite(
+        try await fileSystem.atomicWrite(
             try encoder.encode(index) + Data("\n".utf8),
             to: cacheDir.appendingPathComponent("index.json")
         )
@@ -162,19 +162,20 @@ enum PackageInfoCacheWriter {
         packageDir: URL, destination: URL, disableSandbox: Bool
     ) async throws -> Data {
         if try await isFreshPackageInfo(destination: destination, packageDir: packageDir) {
-            return try await AsyncFileSystem.readData(from: destination)
+            return try await fileSystem.readFile(at: destination.absolutePath)
         }
         let data = try await ManifestLoader.dumpPackageJSON(
             packageDir: packageDir, disableSandbox: disableSandbox)
-        try await AsyncFileSystem.atomicWrite(data, to: destination)
+        try await fileSystem.atomicWrite(data, to: destination)
         return data
     }
 
     private static func isFreshPackageInfo(destination: URL, packageDir: URL) async throws -> Bool {
         guard
-            let cacheDate = try await AsyncFileSystem.modificationDate(destination),
-            let manifestDate = try await AsyncFileSystem.modificationDate(
-                packageDir.appendingPathComponent("Package.swift"))
+            let cacheDate = try await fileSystem.fileMetadata(at: destination.absolutePath)?.lastModificationDate,
+            let manifestDate = try await fileSystem.fileMetadata(
+                at: packageDir.appendingPathComponent("Package.swift").absolutePath
+            )?.lastModificationDate
         else {
             return false
         }

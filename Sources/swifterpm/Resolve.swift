@@ -148,7 +148,7 @@ enum PackageResolver {
             return nil
         }
 
-        guard try await AsyncFileSystem.exists(url.appendingPathComponent("Package.swift")) else {
+        guard try await fileSystem.exists(url.appendingPathComponent("Package.swift").absolutePath) else {
             return nil
         }
         return url.standardizedFileURL
@@ -161,7 +161,7 @@ enum PackageResolver {
 
     private static func originHash(packageDir: URL) async throws -> String {
         Hashing.sha256Hex(
-            try await AsyncFileSystem.readData(
-                from: packageDir.appendingPathComponent("Package.swift")))
+            try await fileSystem.readFile(
+                at: packageDir.appendingPathComponent("Package.swift").absolutePath))
     }
 }

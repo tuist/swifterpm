@@ -421,7 +421,7 @@ struct CLIPathResolver {
 
     init(chdir: CLIPath?) async throws {
         let currentDirectory = URL(
-            fileURLWithPath: try await AsyncFileSystem.currentDirectoryPath(),
+            fileURLWithPath: try await fileSystem.currentWorkingDirectory().pathString,
             isDirectory: true
         )
         guard let chdir else {
@@ -430,7 +430,7 @@ struct CLIPathResolver {
         }
 
         let resolvedChdir = chdir.resolved(relativeTo: currentDirectory)
-        guard try await AsyncFileSystem.isDirectory(resolvedChdir) else {
+        guard try await fileSystem.exists(resolvedChdir.absolutePath, isDirectory: true) else {
             throw ToolError.message("failed to change directory to \(resolvedChdir.path)")
         }
         baseDirectory = resolvedChdir.standardizedFileURL
@@ -530,7 +530,7 @@ enum CLIRunner {
         let resolved: ResolvedPins
         let hasResolvedFile =
             cli.skipUpdate
-            ? try await AsyncFileSystem.exists(package.appendingPathComponent("Package.resolved"))
+            ? try await fileSystem.exists(package.appendingPathComponent("Package.resolved").absolutePath)
             : false
         if readOnly || hasResolvedFile {
             resolved = try await ResolvedFile.read(packageDir: package)

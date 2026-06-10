@@ -1,10 +1,13 @@
+import FileSystem
 import Foundation
+import Path
 @testable import SwifterPMCore
 
 func makeTemporaryDirectory() async throws -> URL {
     let directory = URL(fileURLWithPath: NSTemporaryDirectory())
         .appendingPathComponent("swifterpm-tests-\(UUID().uuidString)", isDirectory: true)
-    try await AsyncFileSystem.createDirectory(at: directory, withIntermediateDirectories: true)
+    try await fileSystem.makeDirectory(
+        at: directory.absolutePath, options: [.createTargetParentDirectories])
     return directory
 }
 
@@ -12,26 +15,28 @@ func withTemporaryDirectory<T>(_ body: (URL) async throws -> T) async throws -> 
     let directory = try await makeTemporaryDirectory()
     do {
         let result = try await body(directory)
-        try? await AsyncFileSystem.removeItem(at: directory)
+        try? await fileSystem.remove(directory.absolutePath)
         return result
     } catch {
-        try? await AsyncFileSystem.removeItem(at: directory)
+        try? await fileSystem.remove(directory.absolutePath)
         throw error
     }
 }
 
 func writeCachedManifest(_ manifest: [String: Any], packageDir: URL) async throws {
-    try await AsyncFileSystem.createDirectory(at: packageDir, withIntermediateDirectories: true)
+    try await fileSystem.makeDirectory(
+        at: packageDir.absolutePath, options: [.createTargetParentDirectories])
     try await writeMinimalPackageManifest(at: packageDir, name: "Fixture")
-    try await AsyncFileSystem.atomicWrite(
+    try await fileSystem.atomicWrite(
         JSONFormatter.prettyData(manifest),
         to: ManifestLoader.cacheFilePath(packageDir: packageDir)
     )
 }
 
 func writeMinimalPackageManifest(at packageDir: URL, name: String) async throws {
-    try await AsyncFileSystem.createDirectory(at: packageDir, withIntermediateDirectories: true)
-    try await AsyncFileSystem.atomicWrite(
+    try await fileSystem.makeDirectory(
+        at: packageDir.absolutePath, options: [.createTargetParentDirectories])
+    try await fileSystem.atomicWrite(
         """
         // swift-tools-version: 6.0
         import PackageDescription
@@ -50,7 +55,7 @@ func fixtureURL(_ components: [String]) async throws -> URL {
     let relative = ["Tests", "swifterpmTests", "Fixtures"] + components
     let env = ProcessInfo.processInfo.environment
     var candidates = try [
-        URL(fileURLWithPath: await AsyncFileSystem.currentDirectoryPath())
+        URL(fileURLWithPath: await fileSystem.currentWorkingDirectory().pathString)
             .appendingPathComponents(relative),
     ]
 
@@ -64,7 +69,7 @@ func fixtureURL(_ components: [String]) async throws -> URL {
         candidates.append(srcDir.appendingPathComponent("_main").appendingPathComponents(relative))
     }
 
-    for candidate in candidates where try (await AsyncFileSystem.exists(candidate)) {
+    for candidate in candidates where try (await fileSystem.exists(candidate.absolutePath)) {
         return candidate
     }
     throw ToolError.message("fixture not found: \(components.joined(separator: "/"))")
@@ -88,7 +93,7 @@ func installedSwiftSupportsManifest(at packageDir: URL) async throws -> Bool {
 
 private func manifestToolsVersion(at packageDir: URL) async throws -> SwiftToolchainVersion? {
     let manifest = packageDir.appendingPathComponent("Package.swift")
-    let contents = try String(data: await AsyncFileSystem.readData(from: manifest), encoding: .utf8)
+    let contents = try String(data: await fileSystem.readFile(at: manifest.absolutePath), encoding: .utf8)
         ?? ""
     guard let firstLine = contents.split(separator: "\n", omittingEmptySubsequences: false).first,
           let range = firstLine.range(of: "swift-tools-version:")

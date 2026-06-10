@@ -30,12 +30,12 @@ enum WorkspaceRestorer {
         _ = scratchLock
         let checkouts = scratchDir.appendingPathComponent("checkouts")
         let registryDownloads = scratchDir.appendingPathComponent("registry/downloads")
-        async let createCheckouts: Void = AsyncFileSystem.createDirectory(
-            at: checkouts, withIntermediateDirectories: true
+        async let createCheckouts: Void = fileSystem.makeDirectory(
+            at: checkouts.absolutePath, options: [.createTargetParentDirectories]
         )
-        async let createRegistryDownloads: Void = AsyncFileSystem.createDirectory(
-            at: registryDownloads,
-            withIntermediateDirectories: true
+        async let createRegistryDownloads: Void = fileSystem.makeDirectory(
+            at: registryDownloads.absolutePath,
+            options: [.createTargetParentDirectories]
         )
         _ = try await (createCheckouts, createRegistryDownloads)
 
@@ -193,7 +193,7 @@ enum WorkspaceRestorer {
                 .appendingPathComponent(".\(destination.lastPathComponent).lock")
         )
         defer { _ = lock }
-        try await AsyncFileSystem.replaceWithSymlinkedDirectory(
+        try await fileSystem.replaceWithSymlinkedDirectory(
             source: source,
             destination: destination
         )
@@ -220,7 +220,7 @@ enum WorkspaceRestorer {
                 archivePath,
                 expectedChecksum: checksum
             ) {
-                try? await AsyncFileSystem.removePath(archivePath)
+                try? await fileSystem.removePath(archivePath)
                 let remoteURL = try artifactURL(url)
                 try await HTTPClient.download(
                     url: remoteURL,
@@ -232,7 +232,7 @@ enum WorkspaceRestorer {
 
         let actualChecksum = try Hashing.sha256Hex(fileAt: archivePath)
         guard actualChecksum.caseInsensitiveCompare(checksum) == .orderedSame else {
-            try? await AsyncFileSystem.removePath(archivePath)
+            try? await fileSystem.removePath(archivePath)
             throw ToolError.message(
                 "\(targetName) checksum mismatch: expected \(checksum), got \(actualChecksum)"
             )
@@ -248,14 +248,14 @@ enum WorkspaceRestorer {
         _ archivePath: URL,
         expectedChecksum: String
     ) async throws -> Bool {
-        guard try await AsyncFileSystem.exists(archivePath) else {
+        guard try await fileSystem.exists(archivePath.absolutePath) else {
             return false
         }
         let actualChecksum = try Hashing.sha256Hex(fileAt: archivePath)
         if actualChecksum.caseInsensitiveCompare(expectedChecksum) == .orderedSame {
             return true
         }
-        try? await AsyncFileSystem.removePath(archivePath)
+        try? await fileSystem.removePath(archivePath)
         return false
     }
 
@@ -263,9 +263,9 @@ enum WorkspaceRestorer {
         archivePath: URL,
         destination: URL
     ) async throws {
-        try await AsyncFileSystem.createDirectory(
-            at: destination.deletingLastPathComponent(),
-            withIntermediateDirectories: true
+        try await fileSystem.makeDirectory(
+            at: destination.deletingLastPathComponent().absolutePath,
+            options: [.createTargetParentDirectories]
         )
         let lock = try await PathLock.acquire(
             at: destination.deletingLastPathComponent()
@@ -276,7 +276,7 @@ enum WorkspaceRestorer {
             return
         }
 
-        let temp = try await AsyncFileSystem.temporaryDirectory(
+        let temp = try await fileSystem.temporaryDirectory(
             in: destination.deletingLastPathComponent()
         )
 
@@ -289,33 +289,34 @@ enum WorkspaceRestorer {
                 archiveDirectory: temp,
                 acceptableExtensions: ["artifactbundle", "xcframework"]
             ) {
-                try await AsyncFileSystem.flattenSingleDirectory(temp)
+                try await fileSystem.flattenSingleDirectory(temp)
             }
             guard try await binaryArtifact(in: temp) != nil else {
                 throw ToolError.message("\(archivePath.lastPathComponent) has no binary artifact")
             }
 
-            if try await AsyncFileSystem.exists(destination) {
-                try await AsyncFileSystem.removePath(destination)
+            if try await fileSystem.exists(destination.absolutePath) {
+                try await fileSystem.removePath(destination)
             }
-            try await AsyncFileSystem.createDirectory(
-                at: destination.deletingLastPathComponent(),
-                withIntermediateDirectories: true
+            try await fileSystem.makeDirectory(
+                at: destination.deletingLastPathComponent().absolutePath,
+                options: [.createTargetParentDirectories]
             )
-            try await AsyncFileSystem.createDirectory(
-                at: destination,
-                withIntermediateDirectories: true
+            try await fileSystem.makeDirectory(
+                at: destination.absolutePath,
+                options: [.createTargetParentDirectories]
             )
-            let entries = try await AsyncFileSystem.contentsOfDirectory(at: temp)
+            let entries = try await fileSystem.contentsOfDirectory(at: temp)
             for entry in entries {
-                try await AsyncFileSystem.moveItem(
-                    at: entry,
-                    to: destination.appendingPathComponent(entry.lastPathComponent)
+                try await fileSystem.move(
+                    from: entry.absolutePath,
+                    to: destination.appendingPathComponent(entry.lastPathComponent).absolutePath,
+                    options: []
                 )
             }
-            try? await AsyncFileSystem.removePath(temp)
+            try? await fileSystem.removePath(temp)
         } catch {
-            try? await AsyncFileSystem.removePath(temp)
+            try? await fileSystem.removePath(temp)
             throw error
         }
     }
@@ -436,7 +437,7 @@ enum WorkspaceRestorer {
             return ref
         }
         let manifestPath = packagePath.appendingPathComponent("Package.swift")
-        guard try await AsyncFileSystem.exists(manifestPath) else {
+        guard try await fileSystem.exists(manifestPath.absolutePath) else {
             return ref
         }
 
@@ -495,8 +496,8 @@ enum WorkspaceRestorer {
     }
 
     private static func binaryArtifacts(in directory: URL) async throws -> [BinaryArtifact] {
-        guard try await AsyncFileSystem.exists(directory) else { return [] }
-        if try await AsyncFileSystem.isDirectoryAndNotSymlink(directory) {
+        guard try await fileSystem.exists(directory.absolutePath) else { return [] }
+        if fileSystem.isDirectoryAndNotSymlink(directory) {
             if directory.pathExtension == "xcframework" {
                 return [BinaryArtifact(path: directory, kind: ["xcframework": [:]])]
             }
@@ -505,9 +506,9 @@ enum WorkspaceRestorer {
             }
         }
         var result: [BinaryArtifact] = []
-        let entries = try await AsyncFileSystem.contentsOfDirectory(at: directory)
+        let entries = try await fileSystem.contentsOfDirectory(at: directory)
         for entry in entries.sorted(by: { $0.path < $1.path }) {
-            guard try await AsyncFileSystem.isDirectoryAndNotSymlink(entry) else { continue }
+            guard fileSystem.isDirectoryAndNotSymlink(entry) else { continue }
             if entry.pathExtension == "xcframework" {
                 result.append(BinaryArtifact(path: entry, kind: ["xcframework": [:]]))
             } else if entry.pathExtension == "artifactbundle" {
@@ -525,8 +526,8 @@ enum WorkspaceRestorer {
         acceptableExtensions: Set<String>
     ) async throws -> Bool {
         var subdirectories: [URL] = []
-        for entry in try await AsyncFileSystem.contentsOfDirectory(at: archiveDirectory) {
-            if try await AsyncFileSystem.isDirectoryAndNotSymlink(entry) {
+        for entry in try await fileSystem.contentsOfDirectory(at: archiveDirectory) {
+            if fileSystem.isDirectoryAndNotSymlink(entry) {
                 subdirectories.append(entry)
             }
         }
@@ -536,7 +537,7 @@ enum WorkspaceRestorer {
         if acceptableExtensions.contains(rootDirectory.pathExtension.lowercased()) {
             return false
         }
-        for entry in try await AsyncFileSystem.contentsOfDirectory(at: rootDirectory) {
+        for entry in try await fileSystem.contentsOfDirectory(at: rootDirectory) {
             if acceptableExtensions.contains(entry.pathExtension.lowercased()) {
                 return true
             }
@@ -552,7 +553,7 @@ enum WorkspaceRestorer {
         let results = try await ConcurrentTasks.map(pins) { pin in
             let source = try await ensureSource(cache: cache, pin: pin)
             let checkout = checkouts.appendingPathComponent(PinKind.checkoutDirectoryName(pin))
-            try await AsyncFileSystem.replaceWithSymlinkedDirectory(
+            try await fileSystem.replaceWithSymlinkedDirectory(
                 source: source, destination: checkout
             )
             return (pin.identity, source)
@@ -572,7 +573,7 @@ enum WorkspaceRestorer {
             )
             let download = try registryDownloads.appendingPathComponent(
                 PinKind.registryDownloadSubpath(pin))
-            try await AsyncFileSystem.replaceWithSymlinkedDirectory(
+            try await fileSystem.replaceWithSymlinkedDirectory(
                 source: source, destination: download
             )
             return (pin.identity, source)
@@ -583,21 +584,21 @@ enum WorkspaceRestorer {
     static func ensureSource(cache: Cache, pin: ResolvedPin) async throws -> URL {
         let destination = try cache.sourcePath(pin: pin)
         let manifest = destination.appendingPathComponent("Package.swift")
-        if try await AsyncFileSystem.exists(manifest) {
+        if try await fileSystem.exists(manifest.absolutePath) {
             return destination
         }
 
         let lock = try await cache.lock(namespace: "sources", key: destination.path)
         _ = lock
-        if try await AsyncFileSystem.exists(manifest) {
+        if try await fileSystem.exists(manifest.absolutePath) {
             return destination
         }
-        if try await AsyncFileSystem.exists(destination) {
-            try await AsyncFileSystem.removeItem(at: destination)
+        if try await fileSystem.exists(destination.absolutePath) {
+            try await fileSystem.remove(destination.absolutePath)
         }
         let parent = destination.deletingLastPathComponent()
-        try await AsyncFileSystem.createDirectory(at: parent, withIntermediateDirectories: true)
-        let temp = try await AsyncFileSystem.temporaryDirectory(in: parent)
+        try await fileSystem.makeDirectory(at: parent.absolutePath, options: [.createTargetParentDirectories])
+        let temp = try await fileSystem.temporaryDirectory(in: parent)
 
         do {
             do {
@@ -608,16 +609,16 @@ enum WorkspaceRestorer {
             }
 
             do {
-                try await AsyncFileSystem.moveItem(at: temp, to: destination)
+                try await fileSystem.move(from: temp.absolutePath, to: destination.absolutePath, options: [])
             } catch {
-                if try await AsyncFileSystem.exists(manifest) {
-                    try? await AsyncFileSystem.removeItem(at: temp)
+                if try await fileSystem.exists(manifest.absolutePath) {
+                    try? await fileSystem.remove(temp.absolutePath)
                     return destination
                 }
                 throw error
             }
         } catch {
-            try? await AsyncFileSystem.removeItem(at: temp)
+            try? await fileSystem.remove(temp.absolutePath)
             throw error
         }
         return destination
@@ -639,21 +640,21 @@ enum WorkspaceRestorer {
             checksum: archive.checksum
         )
         let manifest = destination.appendingPathComponent("Package.swift")
-        if try await AsyncFileSystem.exists(manifest) {
+        if try await fileSystem.exists(manifest.absolutePath) {
             return destination
         }
 
         let lock = try await cache.lock(namespace: "sources", key: destination.path)
         _ = lock
-        if try await AsyncFileSystem.exists(manifest) {
+        if try await fileSystem.exists(manifest.absolutePath) {
             return destination
         }
-        if try await AsyncFileSystem.exists(destination) {
-            try await AsyncFileSystem.removeItem(at: destination)
+        if try await fileSystem.exists(destination.absolutePath) {
+            try await fileSystem.remove(destination.absolutePath)
         }
         let parent = destination.deletingLastPathComponent()
-        try await AsyncFileSystem.createDirectory(at: parent, withIntermediateDirectories: true)
-        let temp = try await AsyncFileSystem.temporaryDirectory(in: parent)
+        try await fileSystem.makeDirectory(at: parent.absolutePath, options: [.createTargetParentDirectories])
+        let temp = try await fileSystem.temporaryDirectory(in: parent)
 
         do {
             try await RegistryClient.downloadArchive(
@@ -666,10 +667,10 @@ enum WorkspaceRestorer {
                 destination: temp
             )
 
-            try await AsyncFileSystem.moveItem(at: temp, to: destination)
+            try await fileSystem.move(from: temp.absolutePath, to: destination.absolutePath, options: [])
         } catch {
-            try? await AsyncFileSystem.removeItem(at: temp)
-            if try await AsyncFileSystem.exists(manifest) {
+            try? await fileSystem.remove(temp.absolutePath)
+            if try await fileSystem.exists(manifest.absolutePath) {
                 return destination
             }
             throw error
@@ -700,10 +701,10 @@ enum WorkspaceRestorer {
         let repo = try GitHubRepo(location: pin.location)
         let revision = try pin.revision()
         let archivePath = cache.archivePath(url: pin.location, revision: revision)
-        if try !(await AsyncFileSystem.exists(archivePath)) {
+        if try !(await fileSystem.exists(archivePath.absolutePath)) {
             let lock = try await cache.lock(namespace: "archives", key: archivePath.path)
             _ = lock
-            if try !(await AsyncFileSystem.exists(archivePath)) {
+            if try !(await fileSystem.exists(archivePath.absolutePath)) {
                 var headers = ["User-Agent": "swifterpm/0.1"]
                 if let token = await GitHubAuth.token() {
                     headers["Authorization"] = "Bearer \(token)"
@@ -719,7 +720,7 @@ enum WorkspaceRestorer {
         try await SystemProcess.run(
             "/usr/bin/tar", ["-xzf", archivePath.path, "-C", destination.path]
         )
-        try await AsyncFileSystem.flattenSingleDirectory(destination)
+        try await fileSystem.flattenSingleDirectory(destination)
         try await rejectArchiveWithSubmodules(destination)
     }
 
@@ -729,10 +730,10 @@ enum WorkspaceRestorer {
         let repo = try GitLabRepo(location: pin.location)
         let revision = try pin.revision()
         let archivePath = cache.archivePath(url: pin.location, revision: revision)
-        if try !(await AsyncFileSystem.exists(archivePath)) {
+        if try !(await fileSystem.exists(archivePath.absolutePath)) {
             let lock = try await cache.lock(namespace: "archives", key: archivePath.path)
             _ = lock
-            if try !(await AsyncFileSystem.exists(archivePath)) {
+            if try !(await fileSystem.exists(archivePath.absolutePath)) {
                 try await GitLabAPI.downloadArchive(
                     repo: repo, revision: revision, destination: archivePath
                 )
@@ -742,7 +743,7 @@ enum WorkspaceRestorer {
         try await SystemProcess.run(
             "/usr/bin/tar", ["-xzf", archivePath.path, "-C", destination.path]
         )
-        try await AsyncFileSystem.flattenSingleDirectory(destination)
+        try await fileSystem.flattenSingleDirectory(destination)
         try await rejectArchiveWithSubmodules(destination)
     }
 
@@ -769,9 +770,9 @@ enum WorkspaceRestorer {
                 )
                 let gitDir = destination.appendingPathComponent(".git")
                 if try await PackageResolver.localSourceControlPackageLocation(pin.location) == nil,
-                   try await AsyncFileSystem.exists(gitDir)
+                   try await fileSystem.exists(gitDir.absolutePath)
                 {
-                    try await AsyncFileSystem.removeItem(at: gitDir)
+                    try await fileSystem.remove(gitDir.absolutePath)
                 }
                 return
             } catch {
@@ -782,7 +783,7 @@ enum WorkspaceRestorer {
     }
 
     private static func rejectArchiveWithSubmodules(_ destination: URL) async throws {
-        if try await AsyncFileSystem.exists(destination.appendingPathComponent(".gitmodules")) {
+        if try await fileSystem.exists(destination.appendingPathComponent(".gitmodules").absolutePath) {
             throw ToolError.message(
                 "\(destination.path) declares git submodules, which GitHub source archives do not include"
             )
@@ -790,13 +791,13 @@ enum WorkspaceRestorer {
     }
 
     private static func resetDirectory(_ url: URL) async throws {
-        if try await AsyncFileSystem.exists(url) {
-            let entries = try await AsyncFileSystem.contentsOfDirectory(at: url)
+        if try await fileSystem.exists(url.absolutePath) {
+            let entries = try await fileSystem.contentsOfDirectory(at: url)
             try await ConcurrentTasks.forEach(entries) { entry in
-                try await AsyncFileSystem.removePath(entry)
+                try await fileSystem.removePath(entry)
             }
         }
-        try await AsyncFileSystem.createDirectory(at: url, withIntermediateDirectories: true)
+        try await fileSystem.makeDirectory(at: url.absolutePath, options: [.createTargetParentDirectories])
     }
 
     static func writeWorkspaceState(
@@ -882,8 +883,8 @@ enum WorkspaceRestorer {
             ],
             "version": 7,
         ]
-        try await AsyncFileSystem.createDirectory(at: scratchDir, withIntermediateDirectories: true)
-        try await AsyncFileSystem.atomicWrite(
+        try await fileSystem.makeDirectory(at: scratchDir.absolutePath, options: [.createTargetParentDirectories])
+        try await fileSystem.atomicWrite(
             JSONFormatter.prettyData(state),
             to: scratchDir.appendingPathComponent("workspace-state.json")
         )
@@ -891,10 +892,10 @@ enum WorkspaceRestorer {
 
     private static func existingWorkspacePrebuilts(scratchDir: URL) async throws -> [[String: Any]] {
         let statePath = scratchDir.appendingPathComponent("workspace-state.json")
-        guard try await AsyncFileSystem.exists(statePath) else { return [] }
+        guard try await fileSystem.exists(statePath.absolutePath) else { return [] }
 
         let state = try JSONSerialization.jsonObject(
-            with: await AsyncFileSystem.readData(from: statePath)
+            with: await fileSystem.readFile(at: statePath.absolutePath)
         ) as? [String: Any]
         let object = state?["object"] as? [String: Any]
 
@@ -932,8 +933,8 @@ enum WorkspaceRestorer {
             disableSandbox: disableSandbox
         )
         let artifactGroups = try await ConcurrentTasks.map(contexts) { context -> [WorkspaceArtifact] in
-            guard try await AsyncFileSystem.exists(
-                context.packagePath.appendingPathComponent("Package.swift")
+            guard try await fileSystem.exists(
+                context.packagePath.appendingPathComponent("Package.swift").absolutePath
             ) else { return [] }
 
             let manifest = try await ManifestLoader.dumpPackage(

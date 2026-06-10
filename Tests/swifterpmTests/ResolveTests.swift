@@ -7,7 +7,7 @@ struct ResolveTests {
     func localSourceControlPackageLocationRequiresPackageManifest() async throws {
         try await withTemporaryDirectory { root in
             #expect(try await PackageResolver.localSourceControlPackageLocation(root.path) == nil)
-            try await AsyncFileSystem.atomicWrite(
+            try await fileSystem.atomicWrite(
                 "package manifest\n", to: root.appendingPathComponent("Package.swift"))
 
             #expect(
@@ -26,7 +26,7 @@ struct ResolveTests {
     @Test
     func localSourceControlPackageLocationAcceptsFileURLs() async throws {
         try await withTemporaryDirectory { root in
-            try await AsyncFileSystem.atomicWrite(
+            try await fileSystem.atomicWrite(
                 "package manifest\n", to: root.appendingPathComponent("Package.swift"))
 
             #expect(

@@ -10,12 +10,17 @@ struct SemVerTests {
     }
 
     @Test
-    func semanticVersionsRejectInvalidCores() {
-        #expect(throws: (any Error).self) {
-            try SemVer("1.2")
-        }
+    func semanticVersionsAcceptAbbreviatedCoresAndRejectNonNumericOnes() throws {
+        // SwiftPM-compatible: shorter cores normalize zero-extended.
+        #expect(try SemVer("1.2").description == "1.2.0")
+        #expect(try SemVer("1").description == "1.0.0")
+        #expect(try SemVer("0.4") == SemVer("0.4.0"))
+
         #expect(throws: (any Error).self) {
             try SemVer("one.two.three")
+        }
+        #expect(throws: (any Error).self) {
+            try SemVer("1.2.3.4")
         }
     }
 

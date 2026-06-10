@@ -144,11 +144,15 @@ enum HTTPClient {
         if let httpResponse = response as? HTTPURLResponse,
             !(200..<300).contains(httpResponse.statusCode)
         {
-            try? await AsyncFileSystem.removeItem(at: downloaded)
+            try? await fileSystem.remove(downloaded.absolutePath)
             throw ToolError.message("HTTP \(httpResponse.statusCode) for \(url.absoluteString)")
         }
 
-        try await AsyncFileSystem.replaceFile(downloaded, at: destination)
+        let destinationPath = try destination.absolutePath
+        try await fileSystem.makeDirectory(
+            at: destinationPath.parentDirectory, options: [.createTargetParentDirectories]
+        )
+        try await fileSystem.replace(destinationPath, with: downloaded.absolutePath)
     }
 }
 
@@ -167,7 +171,7 @@ enum HTTPAuthorization {
 
         if let home = environment["HOME"] {
             let netrcPath = URL(fileURLWithPath: home).appendingPathComponent(".netrc")
-            if let data = try? await AsyncFileSystem.readData(from: netrcPath),
+            if let data = try? await fileSystem.readFile(at: netrcPath.absolutePath),
                let content = String(data: data, encoding: .utf8),
                let credential = RegistryNetrc(content: content).credential(for: url)
             {
@@ -310,68 +314,13 @@ final class PathLock: @unchecked Sendable {
 
 extension PathLock {
     static func acquire(at path: URL) async throws -> PathLock {
-        try await AsyncFileSystem.createDirectory(
-            at: path.deletingLastPathComponent(),
-            withIntermediateDirectories: true
+        try await fileSystem.makeDirectory(
+            at: path.deletingLastPathComponent().absolutePath,
+            options: [.createTargetParentDirectories]
         )
         return try await Task.detached {
             try PathLock(path: path)
         }.value
-    }
-}
-
-extension AsyncFileSystem {
-    static func atomicWrite(_ data: Data, to url: URL) async throws {
-        try await writeData(data, to: url)
-    }
-
-    static func atomicWrite(_ string: String, to url: URL) async throws {
-        try await atomicWrite(Data(string.utf8), to: url)
-    }
-
-    static func removePath(_ url: URL) async throws {
-        guard try await exists(url) else { return }
-        try await removeItem(at: url)
-    }
-
-    static func replaceWithCachedDirectory(source: URL, destination: URL) async throws {
-        if try await exists(destination) {
-            try await removePath(destination)
-        }
-        try await createDirectory(
-            at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if Environment.isCI {
-            try await copyItem(at: source, to: destination)
-            return
-        }
-        try await createSymbolicLink(at: destination, withDestinationURL: source)
-    }
-
-    static func replaceWithSymlinkedDirectory(source: URL, destination: URL) async throws {
-        try await replaceWithCachedDirectory(source: source, destination: destination)
-    }
-
-    static func flattenSingleDirectory(_ url: URL) async throws {
-        let entries = try await contentsOfDirectory(at: url)
-        guard entries.count == 1 else { return }
-        let nested = entries[0]
-        guard try await isDirectoryAndNotSymlink(nested) else { return }
-
-        let temp = url.deletingLastPathComponent().appendingPathComponent(
-            "\(url.lastPathComponent).flattening")
-        if try await exists(temp) {
-            try await removeItem(at: temp)
-        }
-        try await moveItem(at: nested, to: temp)
-        try await removeItem(at: url)
-        try await moveItem(at: temp, to: url)
-    }
-
-    static func temporaryDirectory(in parent: URL) async throws -> URL {
-        try await createDirectory(at: parent, withIntermediateDirectories: true)
-        let url = parent.appendingPathComponent(".tmp-\(UUID().uuidString)")
-        try await createDirectory(at: url, withIntermediateDirectories: true)
-        return url
     }
 }
 

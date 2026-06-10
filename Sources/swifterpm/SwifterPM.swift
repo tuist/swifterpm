@@ -170,7 +170,7 @@ public struct SwifterPM: Sendable {
         let resolved: ResolvedPins
         let hasResolvedFile =
             request.skipUpdate
-            ? try await AsyncFileSystem.exists(package.appendingPathComponent("Package.resolved"))
+            ? try await fileSystem.exists(package.appendingPathComponent("Package.resolved").absolutePath)
             : false
         if request.forceResolvedVersions || hasResolvedFile {
             resolved = try await ResolvedFile.read(packageDir: package)

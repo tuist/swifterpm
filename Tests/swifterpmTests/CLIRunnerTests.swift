@@ -40,7 +40,7 @@ struct CLIRunnerTests {
                 ))
 
             #expect(
-                try await !AsyncFileSystem.exists(root.appendingPathComponent("Package.resolved"))
+                try await !fileSystem.exists(root.appendingPathComponent("Package.resolved").absolutePath)
             )
         }
     }
@@ -51,7 +51,7 @@ struct CLIRunnerTests {
             let package = root.appendingPathComponent("Package")
             try await writeMinimalPackageManifest(at: package, name: "Fixture")
 
-            let currentDirectory = try await AsyncFileSystem.currentDirectoryPath()
+            let currentDirectory = try await fileSystem.currentWorkingDirectory().pathString
 
             try await CLIRunner.run(
                 CLI(
@@ -62,8 +62,8 @@ struct CLIRunnerTests {
                     command: .resolve(.init(packageDir: CLIPath("Package")))
                 ))
 
-            #expect(try await AsyncFileSystem.currentDirectoryPath() == currentDirectory)
-            #expect(try await AsyncFileSystem.exists(root.appendingPathComponent("cache/sources")))
+            #expect(try await fileSystem.currentWorkingDirectory().pathString == currentDirectory)
+            #expect(try await fileSystem.exists(root.appendingPathComponent("cache/sources").absolutePath))
         }
     }
 
