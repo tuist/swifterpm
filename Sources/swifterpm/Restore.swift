@@ -497,7 +497,7 @@ enum WorkspaceRestorer {
 
     private static func binaryArtifacts(in directory: URL) async throws -> [BinaryArtifact] {
         guard try await fileSystem.exists(directory.absolutePath) else { return [] }
-        if try await fileSystem.isDirectoryAndNotSymlink(directory) {
+        if fileSystem.isDirectoryAndNotSymlink(directory) {
             if directory.pathExtension == "xcframework" {
                 return [BinaryArtifact(path: directory, kind: ["xcframework": [:]])]
             }
@@ -508,7 +508,7 @@ enum WorkspaceRestorer {
         var result: [BinaryArtifact] = []
         let entries = try await fileSystem.contentsOfDirectory(at: directory)
         for entry in entries.sorted(by: { $0.path < $1.path }) {
-            guard try await fileSystem.isDirectoryAndNotSymlink(entry) else { continue }
+            guard fileSystem.isDirectoryAndNotSymlink(entry) else { continue }
             if entry.pathExtension == "xcframework" {
                 result.append(BinaryArtifact(path: entry, kind: ["xcframework": [:]]))
             } else if entry.pathExtension == "artifactbundle" {
@@ -527,7 +527,7 @@ enum WorkspaceRestorer {
     ) async throws -> Bool {
         var subdirectories: [URL] = []
         for entry in try await fileSystem.contentsOfDirectory(at: archiveDirectory) {
-            if try await fileSystem.isDirectoryAndNotSymlink(entry) {
+            if fileSystem.isDirectoryAndNotSymlink(entry) {
                 subdirectories.append(entry)
             }
         }

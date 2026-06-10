@@ -61,13 +61,13 @@ struct SupportTests {
             try await fileSystem.replaceWithSymlinkedDirectory(
                 source: source, destination: destination)
             #expect(try await fileSystem.exists(destination.absolutePath))
-            #expect(!(try await fileSystem.isDirectoryAndNotSymlink(destination)))
+            #expect(!(fileSystem.isDirectoryAndNotSymlink(destination)))
             #expect(
                 try await fileSystem.exists(destination.appendingPathComponent("file.txt").absolutePath))
             let data = try await fileSystem.readFile(at: destination.appendingPathComponent("file.txt").absolutePath)
             #expect(String(data: data, encoding: .utf8) == "value")
             #expect(
-                !(try await fileSystem.isDirectoryAndNotSymlink(
+                !(fileSystem.isDirectoryAndNotSymlink(
                     destination.appendingPathComponent("file.txt"))))
         }
     }
@@ -86,7 +86,7 @@ struct SupportTests {
                 try await fileSystem.replaceWithCachedDirectory(
                     source: source, destination: destination)
 
-                #expect(try await fileSystem.isDirectoryAndNotSymlink(destination))
+                #expect(fileSystem.isDirectoryAndNotSymlink(destination))
                 #expect(
                     try await fileSystem.exists(destination.appendingPathComponent("nested/file.txt").absolutePath))
                 let data = try await fileSystem.readFile(at: destination.appendingPathComponent("nested/file.txt").absolutePath)

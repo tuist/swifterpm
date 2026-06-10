@@ -38,7 +38,12 @@ extension FileSystem {
         if !(try await exists(parent, isDirectory: true)) {
             try await makeDirectory(at: parent, options: [.createTargetParentDirectories])
         }
-        try data.write(to: path.fileURL, options: .atomic)
+        // `Data.write(options: .atomic)` is synchronous, so offload it to a detached task to
+        // avoid blocking the cooperative executor while the temp file is renamed into place.
+        let url = path.fileURL
+        try await Task.detached {
+            try data.write(to: url, options: .atomic)
+        }.value
     }
 
     /// Atomically write text to `url`, overwriting any existing file.
@@ -62,7 +67,8 @@ extension FileSystem {
 
     /// True if a path is a directory and not a symbolic link.
     /// `FileSystem.exists(_:, isDirectory: true)` follows symlinks, so we need to use lstat here.
-    func isDirectoryAndNotSymlink(_ url: URL) async throws -> Bool {
+    /// Synchronous because `lstat` is a single non-blocking metadata call.
+    func isDirectoryAndNotSymlink(_ url: URL) -> Bool {
         var stats = stat()
         let result = url.path.withCString { lstat($0, &stats) }
         guard result == 0 else { return false }
@@ -70,7 +76,8 @@ extension FileSystem {
     }
 
     /// True if a path exists or is a (potentially broken) symlink.
-    func existsIncludingSymlinks(_ url: URL) async throws -> Bool {
+    /// Synchronous because `lstat` is a single non-blocking metadata call.
+    func existsIncludingSymlinks(_ url: URL) -> Bool {
         var stats = stat()
         return url.path.withCString { lstat($0, &stats) } == 0
     }
@@ -89,7 +96,7 @@ extension FileSystem {
         let entries = try await contentsOfDirectory(url.absolutePath)
         guard entries.count == 1 else { return }
         let nested = entries[0].fileURL
-        guard try await isDirectoryAndNotSymlink(nested) else { return }
+        guard isDirectoryAndNotSymlink(nested) else { return }
 
         let temp = url.deletingLastPathComponent().appendingPathComponent(
             "\(url.lastPathComponent).flattening")
@@ -106,7 +113,7 @@ extension FileSystem {
     /// payload stays shared).
     func replaceWithCachedDirectory(source: URL, destination: URL) async throws {
         let destinationPath = try destination.absolutePath
-        if try await existsIncludingSymlinks(destination) {
+        if existsIncludingSymlinks(destination) {
             try await remove(destinationPath)
         }
         try await makeDirectory(

@@ -63,9 +63,9 @@ struct FileSystemSupportTests {
                 from: directoryLink.absolutePath, to: targetDirectory.absolutePath)
 
             #expect(try await fileSystem.exists(link.absolutePath))
-            #expect(!(try await fileSystem.isDirectoryAndNotSymlink(link)))
+            #expect(!(fileSystem.isDirectoryAndNotSymlink(link)))
             #expect(try await fileSystem.exists(directoryLink.absolutePath, isDirectory: true))
-            #expect(!(try await fileSystem.isDirectoryAndNotSymlink(directoryLink)))
+            #expect(!(fileSystem.isDirectoryAndNotSymlink(directoryLink)))
             #expect(!(try await fileSystem.currentWorkingDirectory().pathString.isEmpty))
         }
     }
