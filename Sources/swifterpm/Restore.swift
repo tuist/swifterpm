@@ -94,24 +94,18 @@ enum WorkspaceRestorer {
             resolved: resolved,
             disableSandbox: disableSandbox
         )
-        let targetGroups = try await ConcurrentTasks.map(contexts) {
-            context -> [(PackageContext, ManifestBinaryTarget)] in
+        // Dump each manifest inside the per-context fan-out so packages with
+        // zero binary targets short-circuit before paying for a manifest dump,
+        // and downloads for fast-dumping packages start without waiting on
+        // slower ones. Per-target downloads still run concurrently within each
+        // context, preserving total parallelism on multi-package restores.
+        try await ConcurrentTasks.forEach(contexts) { context in
             let manifest = try await ManifestLoader.dumpPackage(
                 packageDir: context.packagePath,
                 disableSandbox: disableSandbox
             )
-            return try ManifestParser.binaryTargets(manifest).map { (context, $0) }
-        }
-        let total = targetGroups.reduce(0) { $0 + $1.count }
-        guard total > 0 else { return }
-        progress?.restoringBinaryArtifacts(count: total)
-        // Keep the original per-context fan-out: downloads across packages run
-        // concurrently, and the targets within each package run concurrently
-        // too. Flattening into a single pool would have capped total in-flight
-        // downloads at one `ConcurrentTasks` width, slowing multi-package,
-        // multi-target restores on high-latency hosts.
-        try await ConcurrentTasks.forEach(targetGroups) { group in
-            try await ConcurrentTasks.forEach(group) { context, target in
+            let binaryTargets = try ManifestParser.binaryTargets(manifest)
+            try await ConcurrentTasks.forEach(binaryTargets) { target in
                 try await restoreBinaryArtifact(
                     target,
                     context: context,

@@ -20,8 +20,6 @@ struct RestoreProgressReporterTests {
         let sink = Sink()
         let reporter = RestoreProgressReporter { sink.append($0) }
 
-        reporter.restoringBinaryArtifacts(count: 1)
-        reporter.restoringBinaryArtifacts(count: 3)
         reporter.downloadingBinaryArtifact(identity: "ffcomposer-apple", target: "libavdevice")
         reporter.restoredBinaryArtifact(
             identity: "ffcomposer-apple", target: "libavdevice", path: "/cache/libavdevice")
@@ -34,8 +32,6 @@ struct RestoreProgressReporterTests {
 
         #expect(
             sink.lines == [
-                "restoring 1 binary artifact",
-                "restoring 3 binary artifacts",
                 "downloading ffcomposer-apple.libavdevice",
                 "restored ffcomposer-apple.libavdevice -> /cache/libavdevice",
                 "restored swift-log -> /checkouts/swift-log",

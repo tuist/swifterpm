@@ -189,10 +189,6 @@ final class RestoreProgressReporter: Sendable {
         self.emit = emit
     }
 
-    func restoringBinaryArtifacts(count: Int) {
-        emit("restoring \(count) binary artifact\(count == 1 ? "" : "s")")
-    }
-
     func downloadingBinaryArtifact(identity: String, target: String) {
         emit("downloading \(identity).\(target)")
     }
