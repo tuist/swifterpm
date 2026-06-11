@@ -125,29 +125,39 @@ enum PackageResolver {
         writeResolvedFile: Bool,
         progress: ResolutionProgressReporter?
     ) async throws -> ResolvedPins {
-        let hasResolvedFile =
-            skipUpdate
-            ? try await fileSystem.exists(
-                packageDir.appendingPathComponent("Package.resolved").absolutePath)
-            : false
-        if readOnly || hasResolvedFile {
+        let resolvedFileURL = packageDir.appendingPathComponent("Package.resolved")
+        let resolvedFileExists = try await fileSystem.exists(resolvedFileURL.absolutePath)
+        if readOnly {
+            guard resolvedFileExists else {
+                throw ToolError.message(
+                    "Package.resolved is required when forcing resolved versions, but no file exists at \(resolvedFileURL.path)"
+                )
+            }
+            return try await ResolvedFile.read(packageDir: packageDir)
+        }
+        // `update --skip-update` trusts the on-disk pins without attempting a
+        // fresh resolve; `resolve --skip-update` still consults `originHash`
+        // via `readIfCurrent` below so a manifest edit isn't silently masked.
+        if skipUpdate, resolvedFileExists, !preferResolvedFile {
             return try await ResolvedFile.read(packageDir: packageDir)
         }
         if preferResolvedFile,
            let existing = try await ResolvedFile.readIfCurrent(packageDir: packageDir)
         {
-            if writeResolvedFile {
-                try await ResolvedFile.write(packageDir: packageDir, resolved: existing)
-            }
             return existing
         }
         // Mirror SwiftPM: `resolve` seeds the solver with the existing
         // Package.resolved (even a stale one) so only pins that no longer
-        // satisfy the manifest change; `update` resolves from scratch.
-        let existingPins =
-            preferResolvedFile
-            ? ((try? await ResolvedFile.read(packageDir: packageDir))?.pins ?? [])
-            : []
+        // satisfy the manifest change; `update` resolves from scratch. The
+        // file is missing or stale here; if it exists, parse it strictly so a
+        // corrupted Package.resolved surfaces instead of silently degrading
+        // to an empty seed.
+        let existingPins: [ResolvedPin]
+        if preferResolvedFile, resolvedFileExists {
+            existingPins = try await ResolvedFile.read(packageDir: packageDir).pins
+        } else {
+            existingPins = []
+        }
         let fresh = try await resolve(
             packageDir: packageDir,
             cache: cache,
