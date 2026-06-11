@@ -22,7 +22,7 @@ enum WorkspaceRestorer {
         cache: Cache,
         registryConfig: RegistryConfig,
         resolved: ResolvedPins,
-        quiet: Bool,
+        progress: RestoreProgressReporter?,
         disableSandbox: Bool = false
     ) async throws {
         let scratchLock = try await PathLock.acquire(
@@ -61,21 +61,23 @@ enum WorkspaceRestorer {
             cache: cache,
             resolved: resolved,
             disableSandbox: disableSandbox,
-            quiet: quiet
+            progress: progress
         )
 
-        guard !quiet else { return }
+        guard let progress else { return }
         for (identity, source) in sourceResults {
-            print("restored \(identity) -> \(source.path)")
+            progress.restoredPackage(identity: identity, path: source.path)
         }
         for (identity, source) in registryResults {
-            print("restored \(identity) -> \(source.path)")
+            progress.restoredPackage(identity: identity, path: source.path)
         }
-        print("restored \(sourceResults.count) source-control packages into \(checkouts.path)")
-        print("restored \(registryResults.count) registry packages into \(registryDownloads.path)")
-        if skipped > 0 {
-            print("skipped \(skipped) unsupported pins")
-        }
+        progress.restoreSummary(
+            sourceCount: sourceResults.count,
+            sourcePath: checkouts.path,
+            registryCount: registryResults.count,
+            registryPath: registryDownloads.path,
+            skipped: skipped
+        )
     }
 
     private static func restoreBinaryArtifacts(
@@ -84,7 +86,7 @@ enum WorkspaceRestorer {
         cache: Cache,
         resolved: ResolvedPins,
         disableSandbox: Bool,
-        quiet: Bool
+        progress: RestoreProgressReporter?
     ) async throws {
         let contexts = try await packageContexts(
             packageDir: packageDir,
@@ -92,6 +94,11 @@ enum WorkspaceRestorer {
             resolved: resolved,
             disableSandbox: disableSandbox
         )
+        // Dump each manifest inside the per-context fan-out so packages with
+        // zero binary targets short-circuit before paying for a manifest dump,
+        // and downloads for fast-dumping packages start without waiting on
+        // slower ones. Per-target downloads still run concurrently within each
+        // context, preserving total parallelism on multi-package restores.
         try await ConcurrentTasks.forEach(contexts) { context in
             let manifest = try await ManifestLoader.dumpPackage(
                 packageDir: context.packagePath,
@@ -104,7 +111,7 @@ enum WorkspaceRestorer {
                     context: context,
                     scratchDir: scratchDir,
                     cache: cache,
-                    quiet: quiet
+                    progress: progress
                 )
             }
         }
@@ -115,7 +122,7 @@ enum WorkspaceRestorer {
         context: PackageContext,
         scratchDir: URL,
         cache: Cache,
-        quiet: Bool
+        progress: RestoreProgressReporter?
     ) async throws {
         switch target.source {
         case let .remote(url, checksum):
@@ -130,11 +137,13 @@ enum WorkspaceRestorer {
                 _ = lock
                 if try await binaryArtifact(in: cachedArtifact) == nil {
                     try await downloadBinaryArtifact(
+                        identity: identity,
                         targetName: target.name,
                         url: url,
                         checksum: checksum,
                         cache: cache,
-                        destination: cachedArtifact
+                        destination: cachedArtifact,
+                        progress: progress
                     )
                 }
             }
@@ -149,9 +158,8 @@ enum WorkspaceRestorer {
                 destination: scratchArtifact
             )
 
-            if !quiet {
-                print("restored \(identity).\(target.name) -> \(cachedArtifact.path)")
-            }
+            progress?.restoredBinaryArtifact(
+                identity: identity, target: target.name, path: cachedArtifact.path)
         case let .local(path):
             let artifactPath = binaryTargetPath(
                 path,
@@ -181,9 +189,8 @@ enum WorkspaceRestorer {
                 source: cachedArtifact,
                 destination: scratchArtifact
             )
-            if !quiet {
-                print("restored \(identity).\(target.name) -> \(cachedArtifact.path)")
-            }
+            progress?.restoredBinaryArtifact(
+                identity: identity, target: target.name, path: cachedArtifact.path)
         }
     }
 
@@ -200,16 +207,22 @@ enum WorkspaceRestorer {
     }
 
     private static func downloadBinaryArtifact(
+        identity: String,
         targetName: String,
         url: String,
         checksum: String,
         cache: Cache,
-        destination: URL
+        destination: URL,
+        progress: RestoreProgressReporter?
     ) async throws {
         let archivePath = cache.binaryArtifactArchivePath(
             url: url,
             checksum: checksum
         )
+        // A valid cached archive has already been hashed and verified by
+        // `validCachedBinaryArtifactArchive`, so extract it directly. Only a
+        // freshly downloaded archive needs the (single) verification hash;
+        // re-hashing a known-good multi-hundred-MB archive is pure waste.
         if try await !validCachedBinaryArtifactArchive(
             archivePath,
             expectedChecksum: checksum
@@ -222,20 +235,21 @@ enum WorkspaceRestorer {
             ) {
                 try? await fileSystem.removePath(archivePath)
                 let remoteURL = try artifactURL(url)
+                progress?.downloadingBinaryArtifact(identity: identity, target: targetName)
                 try await HTTPClient.download(
                     url: remoteURL,
                     destination: archivePath,
-                    headers: await HTTPClient.defaultHeaders(for: remoteURL)
+                    headers: await HTTPClient.binaryArtifactHeaders(for: remoteURL)
                 )
-            }
-        }
 
-        let actualChecksum = try Hashing.sha256Hex(fileAt: archivePath)
-        guard actualChecksum.caseInsensitiveCompare(checksum) == .orderedSame else {
-            try? await fileSystem.removePath(archivePath)
-            throw ToolError.message(
-                "\(targetName) checksum mismatch: expected \(checksum), got \(actualChecksum)"
-            )
+                let actualChecksum = try Hashing.sha256Hex(fileAt: archivePath)
+                guard actualChecksum.caseInsensitiveCompare(checksum) == .orderedSame else {
+                    try? await fileSystem.removePath(archivePath)
+                    throw ToolError.message(
+                        "\(targetName) checksum mismatch: expected \(checksum), got \(actualChecksum)"
+                    )
+                }
+            }
         }
 
         try await extractBinaryArtifactArchive(

@@ -134,7 +134,7 @@ public struct SwifterPM: Sendable {
             cache: cache,
             registryConfig: registryConfig,
             resolved: resolved,
-            quiet: request.quiet,
+            progress: request.quiet ? nil : RestoreProgressReporter(),
             disableSandbox: request.disableSandbox
         )
         try await maybeWritePackageInfoCache(
@@ -167,32 +167,18 @@ public struct SwifterPM: Sendable {
             defaultRegistryURL: request.defaultRegistryURL
         )
 
-        let resolved: ResolvedPins
-        let hasResolvedFile =
-            request.skipUpdate
-            ? try await fileSystem.exists(package.appendingPathComponent("Package.resolved").absolutePath)
-            : false
-        if request.forceResolvedVersions || hasResolvedFile {
-            resolved = try await ResolvedFile.read(packageDir: package)
-        } else if preferResolvedFile,
-                  let existing = try await ResolvedFile.readIfCurrent(packageDir: package)
-        {
-            resolved = existing
-        } else {
-            let progress = request.quiet ? nil : ResolutionProgressReporter()
-            let fresh = try await PackageResolver.resolve(
-                packageDir: package,
-                cache: cache,
-                registryConfig: registryConfig,
-                disableSandbox: request.disableSandbox,
-                scmToRegistryTransformation: request.scmToRegistryTransformation,
-                progress: progress
-            )
-            if request.writeResolvedFile {
-                try await ResolvedFile.write(packageDir: package, resolved: fresh)
-            }
-            resolved = fresh
-        }
+        let resolved = try await PackageResolver.resolveOrLoad(
+            packageDir: package,
+            cache: cache,
+            registryConfig: registryConfig,
+            disableSandbox: request.disableSandbox,
+            scmToRegistryTransformation: request.scmToRegistryTransformation,
+            preferResolvedFile: preferResolvedFile,
+            readOnly: request.forceResolvedVersions,
+            skipUpdate: request.skipUpdate,
+            writeResolvedFile: request.writeResolvedFile,
+            progress: request.quiet ? nil : ResolutionProgressReporter()
+        )
 
         if !request.quiet {
             ResolvedFile.print(resolved)
@@ -204,7 +190,7 @@ public struct SwifterPM: Sendable {
                 cache: cache,
                 registryConfig: registryConfig,
                 resolved: resolved,
-                quiet: request.quiet,
+                progress: request.quiet ? nil : RestoreProgressReporter(),
                 disableSandbox: request.disableSandbox
             )
             try await maybeWritePackageInfoCache(

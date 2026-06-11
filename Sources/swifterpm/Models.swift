@@ -61,6 +61,17 @@ enum ResolvedFile {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         let data = try encoder.encode(resolved) + Data("\n".utf8)
+        let resolvedPath = try path.absolutePath
+        // Skip the rewrite only when we can confirm the on-disk bytes already
+        // match. A read failure (permissions, transient IO) must fall through
+        // to `atomicWrite`, which replaces via a temp sibling, rather than
+        // surface as an error the way an unconditional read would.
+        if try await fileSystem.exists(resolvedPath),
+           let existing = try? await fileSystem.readFile(at: resolvedPath),
+           existing == data
+        {
+            return
+        }
         try await fileSystem.atomicWrite(data, to: path)
     }
 

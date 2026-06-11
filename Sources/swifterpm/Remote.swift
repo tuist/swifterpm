@@ -93,8 +93,10 @@ enum RemoteMetadata {
                 RemoteVersion(version: version.description, revision: peeled[tag] ?? sha))
         }
         return versions.sorted {
-            (try? SemVer($0.version)) ?? SemVer(major: 0, minor: 0, patch: 0)
-                < ((try? SemVer($1.version)) ?? SemVer(major: 0, minor: 0, patch: 0))
+            SemVer.ascendingForSort(
+                (try? SemVer($0.version)) ?? SemVer(major: 0, minor: 0, patch: 0),
+                (try? SemVer($1.version)) ?? SemVer(major: 0, minor: 0, patch: 0)
+            )
         }
     }
 
@@ -130,8 +132,10 @@ enum RemoteMetadata {
             page += 1
         }
         return versions.sorted {
-            (try? SemVer($0.version)) ?? SemVer(major: 0, minor: 0, patch: 0)
-                < ((try? SemVer($1.version)) ?? SemVer(major: 0, minor: 0, patch: 0))
+            SemVer.ascendingForSort(
+                (try? SemVer($0.version)) ?? SemVer(major: 0, minor: 0, patch: 0),
+                (try? SemVer($1.version)) ?? SemVer(major: 0, minor: 0, patch: 0)
+            )
         }
     }
 

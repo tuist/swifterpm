@@ -93,6 +93,31 @@ struct ResolveTests {
     }
 
     @Test
+    func resolveOrLoadReportsAClearErrorWhenReadOnlyAndPackageResolvedIsMissing() async throws {
+        // Pre-PR the readOnly branch fell into `ResolvedFile.read`, which
+        // surfaced a low-level `no such file` from the filesystem layer with no
+        // hint that --force-resolved-versions was the cause. Verify the
+        // domain-specific error replaces it.
+        try await withTemporaryDirectory { root in
+            let cache = try await Cache(root: root.appendingPathComponent("cache"))
+            await #expect(throws: ToolError.self) {
+                try await PackageResolver.resolveOrLoad(
+                    packageDir: root,
+                    cache: cache,
+                    registryConfig: RegistryConfig(),
+                    disableSandbox: true,
+                    scmToRegistryTransformation: .disabled,
+                    preferResolvedFile: true,
+                    readOnly: true,
+                    skipUpdate: false,
+                    writeResolvedFile: false,
+                    progress: nil
+                )
+            }
+        }
+    }
+
+    @Test
     func useRegistryIdentityForSCMKeepsSourceControlLocation() async throws {
         let dependencies = [
             ManifestDependency(

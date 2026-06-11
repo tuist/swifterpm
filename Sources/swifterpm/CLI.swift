@@ -495,7 +495,7 @@ enum CLIRunner {
             try await WorkspaceRestorer.restorePackage(
                 scratchDir: scratch, packageDir: package, cache: cache, registryConfig: registryConfig,
                 resolved: resolved,
-                quiet: cli.quiet,
+                progress: cli.quiet ? nil : RestoreProgressReporter(),
                 disableSandbox: cli.disableSandbox)
             try await maybeWritePackageInfoCache(
                 cli: cli, paths: paths, package: package, scratch: scratch, resolved: resolved)
@@ -527,29 +527,18 @@ enum CLIRunner {
             cli.forceResolvedVersions || cli.disableAutomaticResolution
             || cli.onlyUseVersionsFromResolvedFile
 
-        let resolved: ResolvedPins
-        let hasResolvedFile =
-            cli.skipUpdate
-            ? try await fileSystem.exists(package.appendingPathComponent("Package.resolved").absolutePath)
-            : false
-        if readOnly || hasResolvedFile {
-            resolved = try await ResolvedFile.read(packageDir: package)
-        } else if preferResolvedFile,
-                  let existing = try await ResolvedFile.readIfCurrent(packageDir: package)
-        {
-            resolved = existing
-        } else {
-            let progress = cli.quiet ? nil : ResolutionProgressReporter()
-            let fresh = try await PackageResolver.resolve(
-                packageDir: package, cache: cache, registryConfig: registryConfig,
-                disableSandbox: cli.disableSandbox,
-                scmToRegistryTransformation: try scmToRegistryTransformation(cli),
-                progress: progress)
-            if shouldWrite(write: write, printOnly: printOnly) {
-                try await ResolvedFile.write(packageDir: package, resolved: fresh)
-            }
-            resolved = fresh
-        }
+        let resolved = try await PackageResolver.resolveOrLoad(
+            packageDir: package,
+            cache: cache,
+            registryConfig: registryConfig,
+            disableSandbox: cli.disableSandbox,
+            scmToRegistryTransformation: try scmToRegistryTransformation(cli),
+            preferResolvedFile: preferResolvedFile,
+            readOnly: readOnly,
+            skipUpdate: cli.skipUpdate,
+            writeResolvedFile: shouldWrite(write: write, printOnly: printOnly),
+            progress: cli.quiet ? nil : ResolutionProgressReporter()
+        )
 
         if !cli.quiet {
             ResolvedFile.print(resolved)
@@ -558,7 +547,7 @@ enum CLIRunner {
             try await WorkspaceRestorer.restorePackage(
                 scratchDir: scratch, packageDir: package, cache: cache, registryConfig: registryConfig,
                 resolved: resolved,
-                quiet: cli.quiet,
+                progress: cli.quiet ? nil : RestoreProgressReporter(),
                 disableSandbox: cli.disableSandbox)
             try await maybeWritePackageInfoCache(
                 cli: cli, paths: paths, package: package, scratch: scratch, resolved: resolved)

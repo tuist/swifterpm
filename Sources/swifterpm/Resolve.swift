@@ -7,6 +7,7 @@ enum PackageResolver {
         registryConfig: RegistryConfig,
         disableSandbox: Bool,
         scmToRegistryTransformation: SCMToRegistryTransformation = .disabled,
+        existingPins: [ResolvedPin] = [],
         progress: ResolutionProgressReporter? = nil
     ) async throws -> ResolvedPins {
         let manifest = try await ManifestLoader.dumpPackage(
@@ -41,6 +42,7 @@ enum PackageResolver {
 
         var pins = try await SwiftPMResolverBridge.resolve(
             dependencies: dependencies,
+            existingPins: existingPins,
             cache: cache,
             registryConfig: registryConfig,
             disableSandbox: disableSandbox,
@@ -107,7 +109,72 @@ enum PackageResolver {
         }
     }
 
-    private static func dedupePinsByIdentity(_ pins: [ResolvedPin]) -> [ResolvedPin] {
+    /// Load the resolved pins for `packageDir`, resolving fresh only when
+    /// needed. Centralizes the read-only / current-file / seed-and-resolve
+    /// decision so every entry point (and any `SwifterPMCore` embedder) seeds
+    /// the solver identically instead of re-resolving from scratch.
+    static func resolveOrLoad(
+        packageDir: URL,
+        cache: Cache,
+        registryConfig: RegistryConfig,
+        disableSandbox: Bool,
+        scmToRegistryTransformation: SCMToRegistryTransformation,
+        preferResolvedFile: Bool,
+        readOnly: Bool,
+        skipUpdate: Bool,
+        writeResolvedFile: Bool,
+        progress: ResolutionProgressReporter?
+    ) async throws -> ResolvedPins {
+        let resolvedFileURL = packageDir.appendingPathComponent("Package.resolved")
+        let resolvedFileExists = try await fileSystem.exists(resolvedFileURL.absolutePath)
+        if readOnly {
+            guard resolvedFileExists else {
+                throw ToolError.message(
+                    "Package.resolved is required when forcing resolved versions, but no file exists at \(resolvedFileURL.path)"
+                )
+            }
+            return try await ResolvedFile.read(packageDir: packageDir)
+        }
+        // `--skip-update` is an explicit "trust the on-disk pins" signal:
+        // read the file as-is even when it predates the `originHash` field
+        // (SwiftPM Package.resolved v2). Tightening this to `readIfCurrent`
+        // would silently fall through to a full resolve for every v2 file.
+        if skipUpdate, resolvedFileExists {
+            return try await ResolvedFile.read(packageDir: packageDir)
+        }
+        if preferResolvedFile,
+           let existing = try await ResolvedFile.readIfCurrent(packageDir: packageDir)
+        {
+            return existing
+        }
+        // Mirror SwiftPM: `resolve` seeds the solver with the existing
+        // Package.resolved (even a stale one) so only pins that no longer
+        // satisfy the manifest change; `update` resolves from scratch. The
+        // file is missing or stale here; if it exists, parse it strictly so a
+        // corrupted Package.resolved surfaces instead of silently degrading
+        // to an empty seed.
+        let existingPins: [ResolvedPin]
+        if preferResolvedFile, resolvedFileExists {
+            existingPins = try await ResolvedFile.read(packageDir: packageDir).pins
+        } else {
+            existingPins = []
+        }
+        let fresh = try await resolve(
+            packageDir: packageDir,
+            cache: cache,
+            registryConfig: registryConfig,
+            disableSandbox: disableSandbox,
+            scmToRegistryTransformation: scmToRegistryTransformation,
+            existingPins: existingPins,
+            progress: progress
+        )
+        if writeResolvedFile {
+            try await ResolvedFile.write(packageDir: packageDir, resolved: fresh)
+        }
+        return fresh
+    }
+
+    static func dedupePinsByIdentity(_ pins: [ResolvedPin]) -> [ResolvedPin] {
         var order: [String] = []
         var chosen: [String: ResolvedPin] = [:]
         for pin in pins {
@@ -122,20 +189,6 @@ enum PackageResolver {
             }
         }
         return order.compactMap { chosen[$0] }
-    }
-
-    private static func canonicalSourceControlLocation(_ location: String) -> String {
-        var value = location
-        while value.hasSuffix("/") {
-            value.removeLast()
-        }
-        if value.hasSuffix(".git") {
-            value = String(value.dropLast(4))
-        }
-        if let repo = try? GitHubRepo(location: value) {
-            return "https://github.com/\(repo.owner.lowercased())/\(repo.repo.lowercased())"
-        }
-        return value
     }
 
     static func localSourceControlPackageLocation(_ location: String) async throws -> URL? {

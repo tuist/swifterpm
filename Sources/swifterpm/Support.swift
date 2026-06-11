@@ -121,6 +121,18 @@ enum HTTPClient {
         return headers
     }
 
+    /// Headers for downloading a binary artifact archive. GitHub's release-asset
+    /// API (and similar release-asset proxies) returns the asset metadata JSON
+    /// with HTTP 200 unless the request accepts the raw bytes, so we ask for
+    /// `application/octet-stream`. The `*/*;q=0.9` fallback keeps non-GitHub
+    /// mirrors that strictly honor `Accept` (some self-hosted artifact stores
+    /// reply 406 to a single-type request) able to serve the archive.
+    static func binaryArtifactHeaders(for url: URL) async -> [String: String] {
+        var headers = await defaultHeaders(for: url)
+        headers["Accept"] = "application/octet-stream, */*;q=0.9"
+        return headers
+    }
+
     static func data(url: URL, headers: [String: String] = [:]) async throws -> Data {
         var request = URLRequest(url: url)
         for (key, value) in headers {
@@ -327,7 +339,8 @@ extension PathLock {
 enum JSONFormatter {
     static func prettyData(_ object: Any) throws -> Data {
         let data = try JSONSerialization.data(
-            withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+            withJSONObject: object,
+            options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
         return data + Data("\n".utf8)
     }
 }
@@ -371,8 +384,8 @@ enum PathCanonicalizer {
             #else
                 let resolved = Darwin.realpath(url.path, &buffer)
             #endif
-            if resolved != nil {
-                return URL(fileURLWithPath: String(cString: buffer))
+            if let resolved, let path = String(validatingCString: resolved) {
+                return URL(fileURLWithPath: path)
             }
             return url.standardizedFileURL
         #endif

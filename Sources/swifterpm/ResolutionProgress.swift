@@ -178,6 +178,44 @@ final class ResolutionProgressReporter: @unchecked Sendable {
     }
 }
 
+/// Routes binary-artifact restore progress to an output sink. Passing `nil`
+/// (instead of a `quiet` flag) means silent, mirroring how the resolution path
+/// uses an optional `ResolutionProgressReporter`. The reporter owns the message
+/// formatting; callers own where the output goes.
+final class RestoreProgressReporter: Sendable {
+    private let emit: @Sendable (String) -> Void
+
+    init(emit: @escaping @Sendable (String) -> Void = { Swift.print($0) }) {
+        self.emit = emit
+    }
+
+    func downloadingBinaryArtifact(identity: String, target: String) {
+        emit("downloading \(identity).\(target)")
+    }
+
+    func restoredBinaryArtifact(identity: String, target: String, path: String) {
+        emit("restored \(identity).\(target) -> \(path)")
+    }
+
+    func restoredPackage(identity: String, path: String) {
+        emit("restored \(identity) -> \(path)")
+    }
+
+    func restoreSummary(
+        sourceCount: Int,
+        sourcePath: String,
+        registryCount: Int,
+        registryPath: String,
+        skipped: Int
+    ) {
+        emit("restored \(sourceCount) source-control packages into \(sourcePath)")
+        emit("restored \(registryCount) registry packages into \(registryPath)")
+        if skipped > 0 {
+            emit("skipped \(skipped) unsupported pins")
+        }
+    }
+}
+
 private enum TerminalStyle {
     static func bold(_ value: String) -> String {
         styled(value, code: "1")

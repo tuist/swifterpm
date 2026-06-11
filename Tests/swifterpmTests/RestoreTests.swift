@@ -14,7 +14,7 @@ struct RestoreTests {
                 cache: cache,
                 registryConfig: RegistryConfig(),
                 resolved: ResolvedPins(originHash: nil, pins: [], version: 3),
-                quiet: true
+                progress: nil
             )
 
             #expect(try await fileSystem.exists(scratch.appendingPathComponent("checkouts").absolutePath))
@@ -329,7 +329,7 @@ struct RestoreTests {
                 cache: cache,
                 registryConfig: RegistryConfig(),
                 resolved: resolved,
-                quiet: true
+                progress: nil
             )
             try await WorkspaceRestorer.writeWorkspaceState(
                 packageDir: package, scratchDir: scratch, resolved: resolved, disableSandbox: false
@@ -403,7 +403,7 @@ struct RestoreTests {
                 cache: cache,
                 registryConfig: RegistryConfig(),
                 resolved: resolved,
-                quiet: true
+                progress: nil
             )
 
             let artifactPath = scratch
@@ -438,7 +438,7 @@ struct RestoreTests {
                 cache: cache,
                 registryConfig: RegistryConfig(),
                 resolved: resolved,
-                quiet: true
+                progress: nil
             )
             async let second: Void = WorkspaceRestorer.restorePackage(
                 scratchDir: scratch,
@@ -446,7 +446,7 @@ struct RestoreTests {
                 cache: cache,
                 registryConfig: RegistryConfig(),
                 resolved: resolved,
-                quiet: true
+                progress: nil
             )
             _ = try await (first, second)
 
