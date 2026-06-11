@@ -103,6 +103,49 @@ struct ModelsTests {
     }
 
     @Test
+    func legacyResolvedFileDecodesAndWritesCurrentSchema() async throws {
+        try await withTemporaryDirectory { root in
+            try await writeMinimalPackageManifest(at: root, name: "Fixture")
+            try await fileSystem.atomicWrite(
+                """
+                {
+                  "object": {
+                    "pins": [
+                      {
+                        "package": "DeckOfPlayingCards",
+                        "repositoryURL": "/tmp/deck-of-playing-cards",
+                        "state": {
+                          "revision": "abcdef123456",
+                          "version": "1.0.0"
+                        }
+                      }
+                    ]
+                  },
+                  "version": 1
+                }
+                """,
+                to: root.appendingPathComponent("Package.resolved")
+            )
+
+            let resolved = try await ResolvedFile.read(packageDir: root)
+            let pin = try #require(resolved.pins.first)
+            #expect(resolved.version == 3)
+            #expect(pin.identity == "deck-of-playing-cards")
+            #expect(pin.kind == "localSourceControl")
+            #expect(pin.location == "/tmp/deck-of-playing-cards")
+
+            try await ResolvedFile.write(packageDir: root, resolved: resolved)
+            let rawData = try await fileSystem.readFile(
+                at: root.appendingPathComponent("Package.resolved").absolutePath
+            )
+            let rawContents = try #require(String(data: rawData, encoding: .utf8))
+            #expect(rawContents.contains(#""pins" : ["#))
+            #expect(rawContents.contains(#""version" : 3"#))
+            #expect(!rawContents.contains(#""object""#))
+        }
+    }
+
+    @Test
     func readIfCurrentReturnsNilWhenOriginHashDoesNotMatch() async throws {
         try await withTemporaryDirectory { root in
             try await writeMinimalPackageManifest(at: root, name: "Fixture")

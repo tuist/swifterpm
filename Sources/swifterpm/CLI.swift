@@ -541,10 +541,17 @@ enum CLIRunner {
         } else {
             let progress = cli.quiet ? nil : ResolutionProgressReporter()
             let fresh = try await PackageResolver.resolve(
-                packageDir: package, cache: cache, registryConfig: registryConfig,
+                packageDir: package,
+                scratchDir: scratch,
+                cache: cache,
+                registryConfig: registryConfig,
+                registryConfigurationPath: paths.resolve(cli.configPath),
+                defaultRegistryURL: cli.defaultRegistryURL,
                 disableSandbox: cli.disableSandbox,
                 scmToRegistryTransformation: try scmToRegistryTransformation(cli),
-                progress: progress)
+                writeResolvedFile: shouldWrite(write: write, printOnly: printOnly),
+                progress: progress
+            )
             if shouldWrite(write: write, printOnly: printOnly) {
                 try await ResolvedFile.write(packageDir: package, resolved: fresh)
             }

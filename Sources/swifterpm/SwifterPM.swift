@@ -182,10 +182,14 @@ public struct SwifterPM: Sendable {
             let progress = request.quiet ? nil : ResolutionProgressReporter()
             let fresh = try await PackageResolver.resolve(
                 packageDir: package,
+                scratchDir: scratch,
                 cache: cache,
                 registryConfig: registryConfig,
+                registryConfigurationPath: request.registryConfigurationPath,
+                defaultRegistryURL: request.defaultRegistryURL,
                 disableSandbox: request.disableSandbox,
                 scmToRegistryTransformation: request.scmToRegistryTransformation,
+                writeResolvedFile: request.writeResolvedFile,
                 progress: progress
             )
             if request.writeResolvedFile {
