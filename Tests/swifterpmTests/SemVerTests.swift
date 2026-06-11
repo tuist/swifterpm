@@ -60,6 +60,29 @@ struct SemVerTests {
     }
 
     @Test
+    func ascendingForSortBreaksTiesDeterministicallyForBuildMetadataVariants() throws {
+        // SemVer's `<` is spec-compliant (ignores build metadata), which makes
+        // `sorted(by:<)` unstable for `1.7.3` vs `1.7.3+cio.1`. The tiebreaker
+        // sorts the build-metadata variant before the plain version so that
+        // `.last` (the picked "latest") is deterministic across runs.
+        let plain = try SemVer("1.7.3")
+        let withMetadata = try SemVer("1.7.3+cio.1")
+
+        #expect(SemVer.ascendingForSort(withMetadata, plain))
+        #expect(!SemVer.ascendingForSort(plain, withMetadata))
+        #expect(!SemVer.ascendingForSort(plain, plain))
+
+        let sorted = try [
+            SemVer("1.7.3+cio.1"), SemVer("1.7.3"), SemVer("1.7.3+cio.2"),
+        ].sorted(by: SemVer.ascendingForSort)
+        #expect(sorted.last?.buildMetadata == "")
+
+        // Strictly different versions stay in spec order regardless of metadata.
+        #expect(try SemVer.ascendingForSort(SemVer("1.7.3"), SemVer("1.7.4")))
+        #expect(try !SemVer.ascendingForSort(SemVer("1.7.4"), SemVer("1.7.3+cio.1")))
+    }
+
+    @Test
     func versionRangesMatchExactAndOpenRanges() throws {
         let exact = try VersionRange.singleton(SemVer("1.2.3"))
         #expect(try exact.contains(SemVer("1.2.3")))

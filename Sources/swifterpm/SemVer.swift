@@ -67,6 +67,16 @@ struct SemVer: Hashable, Comparable, CustomStringConvertible, Sendable {
         if !lhs.prerelease.isEmpty && rhs.prerelease.isEmpty { return true }
         return lhs.prerelease < rhs.prerelease
     }
+
+    /// Ascending sort with a deterministic tiebreaker for versions that are
+    /// `==` under the SemVer spec but differ in build metadata. Build-metadata
+    /// variants sort before the plain version so picking `.last`/`max` returns
+    /// the plain form, matching SwiftPM's reproducible-resolve behavior.
+    static func ascendingForSort(_ lhs: SemVer, _ rhs: SemVer) -> Bool {
+        if lhs < rhs { return true }
+        if rhs < lhs { return false }
+        return !lhs.buildMetadata.isEmpty && rhs.buildMetadata.isEmpty
+    }
 }
 
 struct VersionRange: Equatable, Sendable {

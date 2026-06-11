@@ -539,8 +539,10 @@ enum RegistryClient {
             guard release.problem == nil, let semver = try? SemVer(version) else { return nil }
             return RegistryVersion(version: semver.description)
         }.sorted {
-            ($0.semver ?? SemVer(major: 0, minor: 0, patch: 0))
-                < ($1.semver ?? SemVer(major: 0, minor: 0, patch: 0))
+            SemVer.ascendingForSort(
+                $0.semver ?? SemVer(major: 0, minor: 0, patch: 0),
+                $1.semver ?? SemVer(major: 0, minor: 0, patch: 0)
+            )
         }
     }
 
