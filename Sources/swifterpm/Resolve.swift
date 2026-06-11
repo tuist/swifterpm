@@ -135,10 +135,11 @@ enum PackageResolver {
             }
             return try await ResolvedFile.read(packageDir: packageDir)
         }
-        // `update --skip-update` trusts the on-disk pins without attempting a
-        // fresh resolve; `resolve --skip-update` still consults `originHash`
-        // via `readIfCurrent` below so a manifest edit isn't silently masked.
-        if skipUpdate, resolvedFileExists, !preferResolvedFile {
+        // `--skip-update` is an explicit "trust the on-disk pins" signal:
+        // read the file as-is even when it predates the `originHash` field
+        // (SwiftPM Package.resolved v2). Tightening this to `readIfCurrent`
+        // would silently fall through to a full resolve for every v2 file.
+        if skipUpdate, resolvedFileExists {
             return try await ResolvedFile.read(packageDir: packageDir)
         }
         if preferResolvedFile,
