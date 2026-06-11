@@ -55,6 +55,9 @@ mise x github:tuist/swifterpm@latest -- swifterpm --package-path . --force-resol
 
 Useful SwiftPM-shaped flags are supported, including `--package-path`, `--cache-path`, `--scratch-path`, `--build-path`, `--config-path`, `--default-registry-url`, `--skip-update`, `--force-resolved-versions`, `--disable-automatic-resolution`, and `--only-use-versions-from-resolved-file`.
 
+> [!NOTE]
+> `swifterpm resolve` writes `Package.resolved` with an `originHash` derived from `Package.swift`, while SwiftPM derives its hash from the dependency graph. Running `swift package resolve` after `swifterpm resolve` in the same checkout may treat the lockfile as stale and resolve again.
+
 ## Bazel Swift package resolver
 
 `swifterpm` also ships a Bzlmod extension with the same resolver helper shape as `rules_swift_package_manager`:
