@@ -1169,7 +1169,11 @@ scenario_replace_scm_with_registry_falls_back_to_scm_when_registry_has_no_versio
   local version
   version="$(jq -r '.pins[0].state.version' "${package_dir}/Package.resolved")"
 
-  test "${identity}" = "example.registryfoo" || return 1
+  # Identity is SCM-derived (`localregistryfoo`) now that we defer to
+  # SwiftPM. The previous swifterpm rewrote it to the registry identity
+  # `example.registryfoo` even on SCM fallback; SwiftPM's natural
+  # output keeps the SCM identity.
+  test "${identity}" = "localregistryfoo" || return 1
   test "${kind}" = "localSourceControl" || return 1
   test "${location}" = "${dependency_dir}" || return 1
   test "${version}" = "1.0.0" || return 1
@@ -1230,12 +1234,16 @@ scenario_replace_scm_with_registry_skips_directly_incompatible_candidate() {
     --quiet \
     resolve >/dev/null
 
+  # Pins use SCM-derived identities now that the wrapper defers to
+  # SwiftPM (the registry has no compatible versions, so SwiftPM keeps
+  # the SCM identity). Look up by `service` and `proto`, not by the
+  # registry identities the previous rewrite path produced.
   local swifterpm_service_version
   swifterpm_service_version="$(
-    pin_state_value "${package_dir}" "grpc.grpc-swift-protobuf" "version"
+    pin_state_value "${package_dir}" "service" "version"
   )"
   local proto_version
-  proto_version="$(pin_state_value "${package_dir}" "apple.swift-protobuf" "version")"
+  proto_version="$(pin_state_value "${package_dir}" "proto" "version")"
   test "${swifterpm_service_version}" = "${swiftpm_service_version}" || return 1
   test "${proto_version}" = "1.35.1" || return 1
 
@@ -1488,7 +1496,7 @@ Describe "swifterpm registry integration"
   It "falls back to source control when a registry identifier has no versions"
     When call scenario_replace_scm_with_registry_falls_back_to_scm_when_registry_has_no_versions
     The status should be success
-    The output should include "identity=example.registryfoo"
+    The output should include "identity=localregistryfoo"
     The output should include "kind=localSourceControl"
     The output should include "version=1.0.0"
     The output should include "checkout=present"
