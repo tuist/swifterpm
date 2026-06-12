@@ -56,7 +56,10 @@ enum PackageResolver {
                 packageDir: resolutionInput.packageDir,
                 scratchDir: scratchDir,
                 cacheDir: cache.root,
-                registryConfigurationPath: registryConfigurationPath,
+                registryConfigurationPath: try await effectiveRegistryConfigurationPath(
+                    explicit: registryConfigurationPath,
+                    originalPackageDir: resolutionInput.originalPackageDir
+                ),
                 defaultRegistryURL: defaultRegistryURL,
                 disableSandbox: disableSandbox,
                 scmToRegistryTransformation: resolutionInput.swiftPMTransformation,
@@ -90,6 +93,11 @@ enum PackageResolver {
 
     private struct SwiftPMResolutionInput {
         let packageDir: URL
+        /// User's actual packageDir when we redirect resolution to a synthetic
+        /// resolver package. Used to point the subprocess at the project's
+        /// `.swiftpm/configuration/registries.json` even though `--package-path`
+        /// has been rewritten to a temp directory.
+        let originalPackageDir: URL?
         let cleanupDirectory: URL?
         let pinOverrides: [String: PinOverride]
         let swiftPMTransformation: SCMToRegistryTransformation
@@ -105,6 +113,7 @@ enum PackageResolver {
         guard scmToRegistryTransformation != .disabled else {
             return SwiftPMResolutionInput(
                 packageDir: packageDir,
+                originalPackageDir: nil,
                 cleanupDirectory: nil,
                 pinOverrides: [:],
                 swiftPMTransformation: .disabled
@@ -128,10 +137,33 @@ enum PackageResolver {
         )
         return SwiftPMResolutionInput(
             packageDir: resolverPackage,
+            originalPackageDir: packageDir,
             cleanupDirectory: workspace,
             pinOverrides: prepared.pinOverrides,
             swiftPMTransformation: .disabled
         )
+    }
+
+    /// When resolution has been redirected to a synthetic package directory,
+    /// the SwiftPM subprocess no longer auto-discovers the user's
+    /// `<packageDir>/.swiftpm/configuration/registries.json`. Pointing
+    /// `--config-path` at the original packageDir's configuration directory
+    /// restores that discovery without copying files. An explicit caller-
+    /// supplied path always wins.
+    static func effectiveRegistryConfigurationPath(
+        explicit: URL?,
+        originalPackageDir: URL?
+    ) async throws -> URL? {
+        if let explicit { return explicit }
+        guard let originalPackageDir else { return nil }
+        let configuration = originalPackageDir.appendingPathComponent(".swiftpm/configuration")
+        guard try await fileSystem.exists(
+            configuration.appendingPathComponent("registries.json").absolutePath,
+            isDirectory: false
+        ) else {
+            return nil
+        }
+        return configuration
     }
 
     struct RegistryPreparedDependencies {

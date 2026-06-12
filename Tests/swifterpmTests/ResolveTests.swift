@@ -306,6 +306,62 @@ struct ResolveTests {
         }
     }
 
+    @Test
+    func effectiveRegistryConfigurationPathPointsAtOriginalPackageWhenRedirected() async throws {
+        try await withTemporaryDirectory { root in
+            let originalPackageDir = root.appendingPathComponent("original")
+            let configuration = originalPackageDir.appendingPathComponent(".swiftpm/configuration")
+            try await fileSystem.makeDirectory(
+                at: configuration.absolutePath,
+                options: [.createTargetParentDirectories]
+            )
+            try await fileSystem.atomicWrite(
+                #"{"registries":{"[default]":{"url":"https://registry.example.com"}}}"#,
+                to: configuration.appendingPathComponent("registries.json")
+            )
+
+            let resolved = try await PackageResolver.effectiveRegistryConfigurationPath(
+                explicit: nil,
+                originalPackageDir: originalPackageDir
+            )
+            #expect(resolved?.path == configuration.path)
+        }
+    }
+
+    @Test
+    func effectiveRegistryConfigurationPathPrefersExplicitOverFallback() async throws {
+        try await withTemporaryDirectory { root in
+            let originalPackageDir = root.appendingPathComponent("original")
+            let configuration = originalPackageDir.appendingPathComponent(".swiftpm/configuration")
+            try await fileSystem.makeDirectory(
+                at: configuration.absolutePath,
+                options: [.createTargetParentDirectories]
+            )
+            try await fileSystem.atomicWrite(
+                #"{"registries":{}}"#,
+                to: configuration.appendingPathComponent("registries.json")
+            )
+
+            let explicit = root.appendingPathComponent("explicit-config")
+            let resolved = try await PackageResolver.effectiveRegistryConfigurationPath(
+                explicit: explicit,
+                originalPackageDir: originalPackageDir
+            )
+            #expect(resolved?.path == explicit.path)
+        }
+    }
+
+    @Test
+    func effectiveRegistryConfigurationPathIsNilWhenNoConfigurationExists() async throws {
+        try await withTemporaryDirectory { root in
+            let resolved = try await PackageResolver.effectiveRegistryConfigurationPath(
+                explicit: nil,
+                originalPackageDir: root.appendingPathComponent("original")
+            )
+            #expect(resolved == nil)
+        }
+    }
+
     private func writeLibraryPackageManifest(at packageDir: URL, name: String) async throws {
         try await fileSystem.makeDirectory(
             at: packageDir.appendingPathComponent("Sources/\(name)").absolutePath,
