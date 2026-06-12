@@ -196,15 +196,20 @@ struct PackageInfoCacheTests {
                 packages.compactMap { $0["identity"] as? String } == [
                     "local-one", "local-two",
                 ])
-            let expectedLocalOnePath = try PathCanonicalizer.realpath(localOne)
-                .relativePathString(to: scratch)
-            #expect(packages.first?["package_path"] as? String == expectedLocalOnePath)
+            // LocalOne is inside packageDir; encoded relative to scratch via packageDir.
+            // LocalTwo lives outside packageDir; stays absolute.
+            #expect(packages.first?["package_path"] as? String == "../Package/LocalOne")
             for package in packages {
-                let relativePackageInfoPath = try #require(package["package_info_path"] as? String)
-                let resolvedPackageInfoURL = scratch
-                    .appendingPathComponent(relativePackageInfoPath)
-                    .standardizedFileURL
-                #expect(try await fileSystem.exists(resolvedPackageInfoURL.absolutePath))
+                let pathString = try #require(package["package_info_path"] as? String)
+                // cacheDir is a sibling of scratch and outside packageDir in this test
+                // setup, so package_info_path stays absolute. Real Tuist projects place
+                // cacheDir at <scratch>/swifterpm/package-info which keeps it relative.
+                let resolvedURL: URL = if pathString.hasPrefix("/") {
+                    URL(fileURLWithPath: pathString)
+                } else {
+                    scratch.appendingPathComponent(pathString).standardizedFileURL
+                }
+                #expect(try await fileSystem.exists(resolvedURL.absolutePath))
             }
         }
     }

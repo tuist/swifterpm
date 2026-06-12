@@ -238,15 +238,12 @@ struct RestoreTests {
             )
 
             #expect(Set(refsByIdentity.keys) == ["local-one", "local-two"])
-            let expectedLocalOne = try PathCanonicalizer.realpath(localOne)
-                .relativePathString(to: scratch)
-            let expectedLocalTwo = try PathCanonicalizer.realpath(localTwo)
-                .relativePathString(to: scratch)
-            #expect(refsByIdentity["local-one"]?["location"] as? String == expectedLocalOne)
-            #expect(refsByIdentity["local-two"]?["location"] as? String == expectedLocalTwo)
+            // The deps live under packageDir, so they're encoded relative to scratch.
+            #expect(refsByIdentity["local-one"]?["location"] as? String == "../Package/LocalOne")
+            #expect(refsByIdentity["local-two"]?["location"] as? String == "../Package/LocalTwo")
             #expect(
                 Set(dependencies.compactMap { ($0["state"] as? [String: Any])?["path"] as? String })
-                    == [expectedLocalOne, expectedLocalTwo])
+                    == ["../Package/LocalOne", "../Package/LocalTwo"])
         }
     }
 
@@ -284,9 +281,9 @@ struct RestoreTests {
             let source = try #require(artifact["source"] as? [String: Any])
             #expect(artifacts.count == 1)
             #expect(artifact["targetName"] as? String == "Foo")
-            #expect(
-                artifact["path"] as? String
-                    == (try PathCanonicalizer.realpath(framework).relativePathString(to: scratch)))
+            // framework is inside packageDir, scratch is a sibling, so the artifact is
+            // emitted relative to scratch via packageDir.
+            #expect(artifact["path"] as? String == "../Package/XCFrameworks/Foo.xcframework")
             #expect(packageRef["kind"] as? String == "root")
             #expect(packageRef["identity"] as? String == "package")
             #expect(source["type"] as? String == "local")
@@ -356,7 +353,7 @@ struct RestoreTests {
             #expect(artifact["targetName"] as? String == "Foo")
             #expect(
                 artifact["path"] as? String
-                    == (try artifactPath.relativePathString(to: scratch)))
+                    == "swifterpm/artifacts/binary/Foo/Foo.xcframework")
             #expect(packageRef["kind"] as? String == "remoteSourceControl")
             #expect(packageRef["location"] as? String == "https://github.com/example/binary.git")
             #expect(source["type"] as? String == "remote")

@@ -371,6 +371,7 @@ enum WorkspaceRestorer {
                         packageRef: try fileSystemPackageRef(
                             localPackage.dependency,
                             packagePath: localPackage.packagePath,
+                            packageDir: packageDir,
                             scratchDir: scratchDir,
                             name: ManifestParser.packageName(localPackage.manifest)
                         ),
@@ -390,6 +391,7 @@ enum WorkspaceRestorer {
                     packageRef: try await packageRef(
                         pin,
                         packagePath: packagePath,
+                        packageDir: packageDir,
                         scratchDir: scratchDir,
                         disableSandbox: disableSandbox
                     ),
@@ -406,7 +408,9 @@ enum WorkspaceRestorer {
         return [
             "identity": canonical.lastPathComponent.lowercased(),
             "kind": "root",
-            "location": try canonical.relativePathString(to: scratchDir),
+            "location": try canonical.pathRelativeToScratchIfInsidePackage(
+                scratchDir: scratchDir, packageDir: canonical
+            ),
             "name": canonical.lastPathComponent,
         ]
     }
@@ -414,18 +418,25 @@ enum WorkspaceRestorer {
     private static func fileSystemPackageRef(
         _ dependency: ManifestFileSystemDependency,
         packagePath: URL,
+        packageDir: URL,
         scratchDir: URL,
         name: String? = nil
     ) throws -> [String: String] {
         [
             "identity": dependency.identity,
             "kind": "fileSystem",
-            "location": try packagePath.relativePathString(to: scratchDir),
+            "location": try packagePath.pathRelativeToScratchIfInsidePackage(
+                scratchDir: scratchDir, packageDir: packageDir
+            ),
             "name": name ?? dependency.name,
         ]
     }
 
-    private static func packageRef(_ pin: ResolvedPin, scratchDir: URL) throws -> [String: String] {
+    private static func packageRef(
+        _ pin: ResolvedPin,
+        packageDir: URL?,
+        scratchDir: URL
+    ) throws -> [String: String] {
         if PinKind.isRegistry(pin.kind) {
             return [
                 "identity": pin.identity,
@@ -434,12 +445,17 @@ enum WorkspaceRestorer {
                 "name": pin.identity,
             ]
         }
-        // localSourceControl pins carry a filesystem path in `location`; relativize so
-        // workspace-state.json stays portable across hosts.
-        let location: String = if pin.kind == "localSourceControl" {
-            try URL(fileURLWithPath: pin.location).relativePathString(to: scratchDir)
+        // localSourceControl pins carry a filesystem path in `location`. Relativize when
+        // that path lives inside the consuming project; otherwise leave it absolute so
+        // SwiftPM-compat against external local-control deps holds.
+        let location: String
+        if pin.kind == "localSourceControl", let packageDir {
+            location = try URL(fileURLWithPath: pin.location)
+                .pathRelativeToScratchIfInsidePackage(
+                    scratchDir: scratchDir, packageDir: packageDir
+                )
         } else {
-            pin.location
+            location = pin.location
         }
         return [
             "identity": pin.identity,
@@ -452,10 +468,11 @@ enum WorkspaceRestorer {
     private static func packageRef(
         _ pin: ResolvedPin,
         packagePath: URL,
+        packageDir: URL?,
         scratchDir: URL,
         disableSandbox: Bool
     ) async throws -> [String: String] {
-        var ref = try packageRef(pin, scratchDir: scratchDir)
+        var ref = try packageRef(pin, packageDir: packageDir, scratchDir: scratchDir)
         guard PinKind.isSourceControl(pin.kind) else {
             return ref
         }
@@ -836,6 +853,7 @@ enum WorkspaceRestorer {
                 let ref = try await packageRef(
                     pin,
                     packagePath: packagePathForPin(scratchDir: scratchDir, pin: pin),
+                    packageDir: packageDir,
                     scratchDir: scratchDir,
                     disableSandbox: disableSandbox
                 )
@@ -849,7 +867,7 @@ enum WorkspaceRestorer {
                     "subpath": PinKind.checkoutDirectoryName(pin),
                 ])
             } else if PinKind.isRegistry(pin.kind) {
-                let ref = try packageRef(pin, scratchDir: scratchDir)
+                let ref = try packageRef(pin, packageDir: packageDir, scratchDir: scratchDir)
                 try dependencies.append([
                     "basedOn": NSNull(),
                     "packageRef": ref,
@@ -873,6 +891,7 @@ enum WorkspaceRestorer {
             let ref = try fileSystemPackageRef(
                 localPackage.dependency,
                 packagePath: localPackage.packagePath,
+                packageDir: packageDir,
                 scratchDir: scratchDir,
                 name: ManifestParser.packageName(localPackage.manifest)
             )
@@ -881,7 +900,9 @@ enum WorkspaceRestorer {
                 "packageRef": ref,
                 "state": [
                     "name": "fileSystem",
-                    "path": try localPackage.packagePath.relativePathString(to: scratchDir),
+                    "path": try localPackage.packagePath.pathRelativeToScratchIfInsidePackage(
+                        scratchDir: scratchDir, packageDir: packageDir
+                    ),
                 ],
                 "subpath": localPackage.dependency.identity,
             ])
@@ -972,6 +993,7 @@ enum WorkspaceRestorer {
                 try await workspaceArtifact(
                     target,
                     context: context,
+                    packageDir: packageDir,
                     scratchDir: scratchDir
                 )
             }
@@ -983,6 +1005,7 @@ enum WorkspaceRestorer {
     private static func workspaceArtifact(
         _ target: ManifestBinaryTarget,
         context: PackageContext,
+        packageDir: URL,
         scratchDir: URL
     ) async throws -> WorkspaceArtifact? {
         let identity = context.packageRef["identity"] ?? target.name
@@ -1038,7 +1061,9 @@ enum WorkspaceRestorer {
             value: [
                 "kind": artifact.kind,
                 "packageRef": context.packageRef,
-                "path": try artifact.path.relativePathString(to: scratchDir),
+                "path": try artifact.path.pathRelativeToScratchIfInsidePackage(
+                    scratchDir: scratchDir, packageDir: packageDir
+                ),
                 "source": source,
                 "targetName": target.name,
             ])

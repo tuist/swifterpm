@@ -80,6 +80,7 @@ enum PackageInfoCacheWriter {
                 pin: pin,
                 packagePath: packagePath,
                 packageInfoPath: packageInfoPath,
+                packageDir: packageDir,
                 scratchDir: scratchDir
             )
         }.sorted { $0.identity < $1.identity }
@@ -105,15 +106,19 @@ enum PackageInfoCacheWriter {
             _ = try await cachedOrDumpPackageJSON(
                 packageDir: packagePath, destination: packageInfoPath,
                 disableSandbox: disableSandbox)
-            let relativePackagePath = try packagePath.relativePathString(to: scratchDir)
+            let scopedPackagePath = try packagePath.pathRelativeToScratchIfInsidePackage(
+                scratchDir: scratchDir, packageDir: packageDir
+            )
             let entry = PackageInfoEntry(
                 identity: dependency.identity,
                 kind: "fileSystem",
-                location: relativePackagePath,
+                location: scopedPackagePath,
                 version: nil,
                 revision: nil,
-                packagePath: relativePackagePath,
-                packageInfoPath: try packageInfoPath.relativePathString(to: scratchDir)
+                packagePath: scopedPackagePath,
+                packageInfoPath: try packageInfoPath.pathRelativeToScratchIfInsidePackage(
+                    scratchDir: scratchDir, packageDir: packageDir
+                )
             )
             return entry
         }
@@ -124,18 +129,22 @@ enum PackageInfoCacheWriter {
         }
         allPackages.append(contentsOf: localPackages)
 
-        let relativePackageDir = try packageDir.relativePathString(to: scratchDir)
+        let scopedPackageDir = try packageDir.pathRelativeToScratchIfInsidePackage(
+            scratchDir: scratchDir, packageDir: packageDir
+        )
         let index = PackageInfoIndex(
             schemaVersion: 2,
             generatedAtUnix: UInt64(Date().timeIntervalSince1970),
             root: PackageInfoEntry(
                 identity: "root",
                 kind: "root",
-                location: relativePackageDir,
+                location: scopedPackageDir,
                 version: nil,
                 revision: resolved.originHash,
-                packagePath: relativePackageDir,
-                packageInfoPath: try rootPath.relativePathString(to: scratchDir)
+                packagePath: scopedPackageDir,
+                packageInfoPath: try rootPath.pathRelativeToScratchIfInsidePackage(
+                    scratchDir: scratchDir, packageDir: packageDir
+                )
             ),
             packages: allPackages
         )
@@ -192,15 +201,21 @@ enum PackageInfoCacheWriter {
         pin: ResolvedPin,
         packagePath: URL,
         packageInfoPath: URL,
+        packageDir: URL,
         scratchDir: URL
     ) throws -> PackageInfoEntry {
-        // localSourceControl pins carry a filesystem path in `location`; relativize so
-        // the index stays portable across hosts. Remote/registry pins keep their URL or
-        // identity verbatim.
-        let location: String = if pin.kind == "localSourceControl" {
-            try URL(fileURLWithPath: pin.location).relativePathString(to: scratchDir)
+        // localSourceControl pins carry a filesystem path in `location`. Relativize only
+        // when that path lives inside the consuming project; external clones stay
+        // absolute so SwiftPM-compat against the e2e diff fixtures still holds. Remote
+        // and registry pins keep their URL or identity verbatim.
+        let location: String
+        if pin.kind == "localSourceControl" {
+            location = try URL(fileURLWithPath: pin.location)
+                .pathRelativeToScratchIfInsidePackage(
+                    scratchDir: scratchDir, packageDir: packageDir
+                )
         } else {
-            pin.location
+            location = pin.location
         }
         return PackageInfoEntry(
             identity: pin.identity,
@@ -208,8 +223,12 @@ enum PackageInfoCacheWriter {
             location: location,
             version: pin.state.version,
             revision: pin.state.revision,
-            packagePath: try packagePath.relativePathString(to: scratchDir),
-            packageInfoPath: try packageInfoPath.relativePathString(to: scratchDir)
+            packagePath: try packagePath.pathRelativeToScratchIfInsidePackage(
+                scratchDir: scratchDir, packageDir: packageDir
+            ),
+            packageInfoPath: try packageInfoPath.pathRelativeToScratchIfInsidePackage(
+                scratchDir: scratchDir, packageDir: packageDir
+            )
         )
     }
 
