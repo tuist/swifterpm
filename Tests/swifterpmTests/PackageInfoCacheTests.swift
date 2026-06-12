@@ -29,12 +29,15 @@ struct PackageInfoCacheTests {
                 JSONSerialization.jsonObject(
                     with: try await fileSystem.readFile(at: indexPath.absolutePath))
                     as? [String: Any])
-            #expect(index["schema_version"] as? Int == 1)
+            #expect(index["schema_version"] as? Int == 2)
             #expect((index["packages"] as? [[String: Any]])?.isEmpty == true)
 
             let rootEntry = try #require(index["root"] as? [String: Any])
             #expect(rootEntry["identity"] as? String == "root")
             #expect(rootEntry["revision"] as? String == "origin")
+            #expect(
+                rootEntry["package_path"] as? String
+                    == (try package.relativePathString(to: scratch)))
         }
     }
 
@@ -193,12 +196,15 @@ struct PackageInfoCacheTests {
                 packages.compactMap { $0["identity"] as? String } == [
                     "local-one", "local-two",
                 ])
-            #expect(
-                packages.first?["package_path"] as? String
-                    == PathCanonicalizer.realpath(localOne).path)
+            let expectedLocalOnePath = try PathCanonicalizer.realpath(localOne)
+                .relativePathString(to: scratch)
+            #expect(packages.first?["package_path"] as? String == expectedLocalOnePath)
             for package in packages {
-                let packageInfoPath = try #require(package["package_info_path"] as? String)
-                #expect(try await fileSystem.exists(URL(fileURLWithPath: packageInfoPath).absolutePath))
+                let relativePackageInfoPath = try #require(package["package_info_path"] as? String)
+                let resolvedPackageInfoURL = scratch
+                    .appendingPathComponent(relativePackageInfoPath)
+                    .standardizedFileURL
+                #expect(try await fileSystem.exists(resolvedPackageInfoURL.absolutePath))
             }
         }
     }

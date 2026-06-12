@@ -238,8 +238,10 @@ struct RestoreTests {
             )
 
             #expect(Set(refsByIdentity.keys) == ["local-one", "local-two"])
-            let expectedLocalOne = PathCanonicalizer.realpath(localOne).path
-            let expectedLocalTwo = PathCanonicalizer.realpath(localTwo).path
+            let expectedLocalOne = try PathCanonicalizer.realpath(localOne)
+                .relativePathString(to: scratch)
+            let expectedLocalTwo = try PathCanonicalizer.realpath(localTwo)
+                .relativePathString(to: scratch)
             #expect(refsByIdentity["local-one"]?["location"] as? String == expectedLocalOne)
             #expect(refsByIdentity["local-two"]?["location"] as? String == expectedLocalTwo)
             #expect(
@@ -282,7 +284,9 @@ struct RestoreTests {
             let source = try #require(artifact["source"] as? [String: Any])
             #expect(artifacts.count == 1)
             #expect(artifact["targetName"] as? String == "Foo")
-            #expect(artifact["path"] as? String == PathCanonicalizer.realpath(framework).path)
+            #expect(
+                artifact["path"] as? String
+                    == (try PathCanonicalizer.realpath(framework).relativePathString(to: scratch)))
             #expect(packageRef["kind"] as? String == "root")
             #expect(packageRef["identity"] as? String == "package")
             #expect(source["type"] as? String == "local")
@@ -350,7 +354,9 @@ struct RestoreTests {
 
             #expect(artifacts.count == 1)
             #expect(artifact["targetName"] as? String == "Foo")
-            #expect(artifact["path"] as? String == artifactPath.path)
+            #expect(
+                artifact["path"] as? String
+                    == (try artifactPath.relativePathString(to: scratch)))
             #expect(packageRef["kind"] as? String == "remoteSourceControl")
             #expect(packageRef["location"] as? String == "https://github.com/example/binary.git")
             #expect(source["type"] as? String == "remote")
@@ -459,6 +465,70 @@ struct RestoreTests {
             )
             #expect(try await fileSystem.exists(artifactPath.absolutePath))
             #expect(try await fileSystem.exists(cachedArtifact.absolutePath))
+        }
+    }
+
+    @Test
+    func writeWorkspaceStateEmitsScratchRelativeArtifactAndDependencyPaths() async throws {
+        // Regression test for cross-host `.build/` caching: every path written to
+        // workspace-state.json should be relative to the scratch directory, so a
+        // cached `.build/` can be restored under a different absolute prefix and
+        // still resolve back to real files.
+        try await withTemporaryDirectory { root in
+            let package = root.appendingPathComponent("Package")
+            let local = package.appendingPathComponent("LocalDep")
+            let scratch = root.appendingPathComponent("Package/.build")
+            let framework = package.appendingPathComponent("XCFrameworks/Foo.xcframework")
+            try await fileSystem.makeDirectory(at: framework.absolutePath, options: [.createTargetParentDirectories])
+            try await fileSystem.atomicWrite(
+                validXCFrameworkInfoPlist(),
+                to: framework.appendingPathComponent("Info.plist")
+            )
+            var rootManifest = localBinaryTargetManifest(name: "Foo", path: "XCFrameworks/Foo.xcframework")
+            rootManifest["dependencies"] = [
+                [
+                    "fileSystem": [
+                        [
+                            "identity": "local-dep",
+                            "path": "LocalDep",
+                        ],
+                    ]
+                ],
+            ]
+            try await writeCachedManifest(rootManifest, packageDir: package)
+            try await writeCachedManifest(emptyManifest(name: "LocalDep"), packageDir: local)
+
+            try await WorkspaceRestorer.writeWorkspaceState(
+                packageDir: package,
+                scratchDir: scratch,
+                resolved: ResolvedPins(originHash: "origin", pins: [], version: 3),
+                disableSandbox: false
+            )
+
+            let statePath = scratch.appendingPathComponent("workspace-state.json")
+            let state = try #require(
+                try JSONSerialization.jsonObject(
+                    with: await fileSystem.readFile(at: statePath.absolutePath))
+                    as? [String: Any])
+            let object = try #require(state["object"] as? [String: Any])
+            let artifacts = try #require(object["artifacts"] as? [[String: Any]])
+            let dependencies = try #require(object["dependencies"] as? [[String: Any]])
+
+            let artifactPath = try #require(artifacts.first?["path"] as? String)
+            let dependencyStatePath = try #require(
+                (dependencies.first?["state"] as? [String: Any])?["path"] as? String)
+            let dependencyLocation = try #require(
+                (dependencies.first?["packageRef"] as? [String: Any])?["location"] as? String)
+
+            #expect(!artifactPath.hasPrefix("/"))
+            #expect(!dependencyStatePath.hasPrefix("/"))
+            #expect(!dependencyLocation.hasPrefix("/"))
+
+            // Sanity check: anchoring back to scratch resolves to the real on-disk file.
+            let resolvedArtifact = scratch
+                .appendingPathComponent(artifactPath)
+                .standardizedFileURL
+            #expect(try await fileSystem.exists(resolvedArtifact.absolutePath))
         }
     }
 

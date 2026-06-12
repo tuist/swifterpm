@@ -26,6 +26,18 @@ extension AbsolutePath {
     }
 }
 
+extension URL {
+    /// Path of `self` expressed relative to `base`, using `..` components as needed.
+    /// Returns `"."` when `self` and `base` refer to the same path.
+    /// Used to keep `.build/workspace-state.json` and the swifterpm package-info index
+    /// relocatable: paths are anchored to `scratchDir` so a cached `.build/` works
+    /// after the project tree moves to a different absolute location.
+    func relativePathString(to base: URL) throws -> String {
+        let relative = try absolutePath.relative(to: base.absolutePath).pathString
+        return relative.isEmpty ? "." : relative
+    }
+}
+
 extension FileSystem {
     /// Write `data` atomically by writing to a temp sibling and then replacing the destination.
     /// Creates parent directories if missing.

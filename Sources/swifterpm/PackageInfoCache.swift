@@ -76,8 +76,12 @@ enum PackageInfoCacheWriter {
             _ = try await cachedOrDumpPackageJSON(
                 packageDir: packagePath, destination: packageInfoPath,
                 disableSandbox: disableSandbox)
-            return packageEntry(
-                pin: pin, packagePath: packagePath, packageInfoPath: packageInfoPath)
+            return try packageEntry(
+                pin: pin,
+                packagePath: packagePath,
+                packageInfoPath: packageInfoPath,
+                scratchDir: scratchDir
+            )
         }.sorted { $0.identity < $1.identity }
 
         var allPackages = packages
@@ -101,14 +105,15 @@ enum PackageInfoCacheWriter {
             _ = try await cachedOrDumpPackageJSON(
                 packageDir: packagePath, destination: packageInfoPath,
                 disableSandbox: disableSandbox)
+            let relativePackagePath = try packagePath.relativePathString(to: scratchDir)
             let entry = PackageInfoEntry(
                 identity: dependency.identity,
                 kind: "fileSystem",
-                location: packagePath.path,
+                location: relativePackagePath,
                 version: nil,
                 revision: nil,
-                packagePath: packagePath.path,
-                packageInfoPath: packageInfoPath.path
+                packagePath: relativePackagePath,
+                packageInfoPath: try packageInfoPath.relativePathString(to: scratchDir)
             )
             return entry
         }
@@ -119,17 +124,18 @@ enum PackageInfoCacheWriter {
         }
         allPackages.append(contentsOf: localPackages)
 
+        let relativePackageDir = try packageDir.relativePathString(to: scratchDir)
         let index = PackageInfoIndex(
-            schemaVersion: 1,
+            schemaVersion: 2,
             generatedAtUnix: UInt64(Date().timeIntervalSince1970),
             root: PackageInfoEntry(
                 identity: "root",
                 kind: "root",
-                location: packageDir.path,
+                location: relativePackageDir,
                 version: nil,
                 revision: resolved.originHash,
-                packagePath: packageDir.path,
-                packageInfoPath: rootPath.path
+                packagePath: relativePackageDir,
+                packageInfoPath: try rootPath.relativePathString(to: scratchDir)
             ),
             packages: allPackages
         )
@@ -182,17 +188,28 @@ enum PackageInfoCacheWriter {
         return cacheDate >= manifestDate
     }
 
-    private static func packageEntry(pin: ResolvedPin, packagePath: URL, packageInfoPath: URL)
-        -> PackageInfoEntry
-    {
-        PackageInfoEntry(
+    private static func packageEntry(
+        pin: ResolvedPin,
+        packagePath: URL,
+        packageInfoPath: URL,
+        scratchDir: URL
+    ) throws -> PackageInfoEntry {
+        // localSourceControl pins carry a filesystem path in `location`; relativize so
+        // the index stays portable across hosts. Remote/registry pins keep their URL or
+        // identity verbatim.
+        let location: String = if pin.kind == "localSourceControl" {
+            try URL(fileURLWithPath: pin.location).relativePathString(to: scratchDir)
+        } else {
+            pin.location
+        }
+        return PackageInfoEntry(
             identity: pin.identity,
             kind: pin.kind,
-            location: pin.location,
+            location: location,
             version: pin.state.version,
             revision: pin.state.revision,
-            packagePath: packagePath.path,
-            packageInfoPath: packageInfoPath.path
+            packagePath: try packagePath.relativePathString(to: scratchDir),
+            packageInfoPath: try packageInfoPath.relativePathString(to: scratchDir)
         )
     }
 
