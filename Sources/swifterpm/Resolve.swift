@@ -28,7 +28,17 @@ enum PackageResolver {
         let dependencies = manifestDependencies
         let originHash = try await originHash(packageDir: packageDir)
         guard !dependencies.isEmpty else {
-            let resolved = ResolvedPins(originHash: originHash, pins: [], version: 3)
+            // Match SwiftPM's `saveResolvedFile` schema selection: V3 (with
+            // originHash) for tools > 5.9, V2 for >= 5.6, V1 otherwise.
+            // `ResolvedFile.write` removes the file when pins is empty, so this
+            // version is only observed by in-memory consumers — but we still
+            // match SwiftPM's choice rather than hardcoding one.
+            let toolsVersion = try await packageToolsVersion(packageDir: packageDir)
+            let resolved = ResolvedPins(
+                originHash: originHash,
+                pins: [],
+                version: resolvedFileSchemaVersion(toolsVersion: toolsVersion)
+            )
             if writeResolvedFile {
                 try await ResolvedFile.write(packageDir: packageDir, resolved: resolved)
             }
@@ -57,7 +67,9 @@ enum PackageResolver {
         )
         resolved.originHash = originHash
         resolved.pins = dedupePinsByIdentity(resolved.pins)
-        resolved.pins.sort { $0.identity < $1.identity }
+        // Match SwiftPM's case-insensitive identity sort so the lockfile is
+        // byte-equivalent regardless of which tool wrote it.
+        resolved.pins.sort { $0.identity.lowercased() < $1.identity.lowercased() }
         if writeResolvedFile {
             // SwiftPM writes Package.resolved with its own originHash; rewrite
             // with ours so consumers can detect manifest changes.
@@ -280,8 +292,43 @@ enum PackageResolver {
     }
 
     private static func originHash(packageDir: URL) async throws -> String {
+        // Matches SwiftPM's `computeResolvedFileOriginHash`: for our single-
+        // package, no-extra-root-dependencies invocation shape, that function
+        // reduces to sha256 over the root Package.swift bytes.
         Hashing.sha256Hex(
             try await fileSystem.readFile(
                 at: packageDir.appendingPathComponent("Package.swift").absolutePath))
+    }
+
+    private static func packageToolsVersion(packageDir: URL) async throws -> (major: Int, minor: Int)? {
+        let data = try await fileSystem.readFile(
+            at: packageDir.appendingPathComponent("Package.swift").absolutePath)
+        guard let firstLine = String(data: data, encoding: .utf8)?
+            .split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+            .first
+        else { return nil }
+        let prefix = "swift-tools-version"
+        guard let colon = firstLine.range(of: prefix),
+              let version = firstLine[colon.upperBound...]
+                .drop(while: { $0 == ":" || $0.isWhitespace })
+                .split(separator: ".", maxSplits: 2, omittingEmptySubsequences: false)
+                .prefix(2)
+                .map(String.init) as [String]?,
+              version.count >= 2,
+              let major = Int(version[0]),
+              let minor = Int(version[1].prefix(while: { $0.isNumber }))
+        else { return nil }
+        return (major, minor)
+    }
+
+    private static func resolvedFileSchemaVersion(toolsVersion: (major: Int, minor: Int)?) -> Int {
+        guard let toolsVersion else { return 3 }
+        if toolsVersion.major > 5 || (toolsVersion.major == 5 && toolsVersion.minor > 9) {
+            return 3
+        }
+        if toolsVersion.major == 5 && toolsVersion.minor >= 6 {
+            return 2
+        }
+        return 1
     }
 }
