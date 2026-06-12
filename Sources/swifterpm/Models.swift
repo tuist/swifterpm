@@ -44,12 +44,24 @@ struct ResolvedPin: Codable, Equatable, Sendable {
     var kind: String
     var location: String
     var state: ResolvedState
+    /// The SCM URL the pin was originally declared as before
+    /// `--replace-scm-with-registry` mapped it to a registry identity.
+    /// SwiftPM records this so subsequent resolves can skip the registry
+    /// identifier lookup; preserve it through the read/write roundtrip.
+    var originalLocation: String?
 
-    init(identity: String, kind: String, location: String, state: ResolvedState) {
+    init(
+        identity: String,
+        kind: String,
+        location: String,
+        state: ResolvedState,
+        originalLocation: String? = nil
+    ) {
         self.identity = identity
         self.kind = kind
         self.location = location
         self.state = state
+        self.originalLocation = originalLocation
     }
 
     init(from decoder: Decoder) throws {
@@ -66,6 +78,7 @@ struct ResolvedPin: Codable, Equatable, Sendable {
         kind = try container.decodeIfPresent(String.self, forKey: .kind)
             ?? Self.sourceControlKind(location: location)
         state = try container.decode(ResolvedState.self, forKey: .state)
+        originalLocation = try container.decodeIfPresent(String.self, forKey: .originalLocation)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -73,6 +86,7 @@ struct ResolvedPin: Codable, Equatable, Sendable {
         try container.encode(identity, forKey: .identity)
         try container.encode(kind, forKey: .kind)
         try container.encode(location, forKey: .location)
+        try container.encodeIfPresent(originalLocation, forKey: .originalLocation)
         try container.encode(state, forKey: .state)
     }
 
@@ -98,6 +112,7 @@ struct ResolvedPin: Codable, Equatable, Sendable {
         case identity
         case kind
         case location
+        case originalLocation
         case package
         case repositoryURL
         case state
