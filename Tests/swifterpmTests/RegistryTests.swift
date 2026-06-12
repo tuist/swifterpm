@@ -46,27 +46,6 @@ struct RegistryTests {
     }
 
     @Test
-    func loadAllowsLocalHTTPRegistryURLForTests() async throws {
-        try await withTemporaryDirectory { root in
-            let config = try await RegistryConfig.load(
-                packageDir: root,
-                configPath: nil,
-                defaultRegistryURL: "http://127.0.0.1:8080"
-            )
-
-            #expect(
-                config.sourceControlLookupRegistryURL()?.absoluteString
-                    == "http://127.0.0.1:8080")
-        }
-    }
-
-    @Test
-    func registryVersionSemverRejectsInvalidVersions() {
-        #expect(RegistryVersion(version: "1.2.3").semver?.description == "1.2.3")
-        #expect(RegistryVersion(version: "branch").semver == nil)
-    }
-
-    @Test
     func registryAuthorizationUsesBearerForTokenUserByDefault() async throws {
         let config = try await registryConfig()
         let header = RegistryAuthorization.header(

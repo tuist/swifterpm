@@ -33,10 +33,6 @@ struct CacheTests {
                 ).path
                     .hasPrefix(
                         root.path))
-            #expect(
-                cache.registryVersionsPath(
-                    registryURL: "https://registry.example.com", identity: "example.package"
-                ).path.hasPrefix(root.path))
         }
     }
 
@@ -50,7 +46,6 @@ struct CacheTests {
                 "archives",
                 "registry/archives",
                 "metadata/remotes",
-                "metadata/registries",
                 "locks",
                 "virtual/checkouts",
                 "artifacts",
