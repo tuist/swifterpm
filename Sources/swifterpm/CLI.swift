@@ -529,8 +529,11 @@ enum CLIRunner {
 
         let resolved = try await PackageResolver.resolveOrLoad(
             packageDir: package,
+            scratchDir: scratch,
             cache: cache,
             registryConfig: registryConfig,
+            registryConfigurationPath: paths.resolve(cli.configPath),
+            defaultRegistryURL: cli.defaultRegistryURL,
             disableSandbox: cli.disableSandbox,
             scmToRegistryTransformation: try scmToRegistryTransformation(cli),
             preferResolvedFile: preferResolvedFile,

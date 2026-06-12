@@ -169,8 +169,11 @@ public struct SwifterPM: Sendable {
 
         let resolved = try await PackageResolver.resolveOrLoad(
             packageDir: package,
+            scratchDir: scratch,
             cache: cache,
             registryConfig: registryConfig,
+            registryConfigurationPath: request.registryConfigurationPath,
+            defaultRegistryURL: request.defaultRegistryURL,
             disableSandbox: request.disableSandbox,
             scmToRegistryTransformation: request.scmToRegistryTransformation,
             preferResolvedFile: preferResolvedFile,

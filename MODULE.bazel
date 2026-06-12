@@ -33,6 +33,5 @@ use_repo(
     nio_swift_deps,
     "swiftpkg_filesystem",
     "swiftpkg_path",
-    "swiftpkg_swift_package_manager",
     "swiftpkg_swift_subprocess",
 )
