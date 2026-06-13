@@ -28,7 +28,17 @@ enum PackageResolver {
         let dependencies = manifestDependencies
         let originHash = try await originHash(packageDir: packageDir)
         guard !dependencies.isEmpty else {
-            let resolved = ResolvedPins(originHash: originHash, pins: [], version: 3)
+            // Match SwiftPM's `saveResolvedFile` schema selection: V3 (with
+            // originHash) for tools > 5.9, V2 for >= 5.6, V1 otherwise.
+            // `ResolvedFile.write` removes the file when pins is empty, so this
+            // version is only observed by in-memory consumers — but we still
+            // match SwiftPM's choice rather than hardcoding one.
+            let toolsVersion = try await packageToolsVersion(packageDir: packageDir)
+            let resolved = ResolvedPins(
+                originHash: originHash,
+                pins: [],
+                version: resolvedFileSchemaVersion(toolsVersion: toolsVersion)
+            )
             if writeResolvedFile {
                 try await ResolvedFile.write(packageDir: packageDir, resolved: resolved)
             }
@@ -44,422 +54,29 @@ enum PackageResolver {
             }.count
         )
 
-        let resolutionInput = try await swiftPMResolutionInput(
+        var resolved = try await resolveWithSwiftPackageManagerProcess(
             packageDir: packageDir,
-            cache: cache,
-            registryConfig: registryConfig,
-            dependencies: dependencies,
-            scmToRegistryTransformation: scmToRegistryTransformation
+            scratchDir: scratchDir,
+            cacheDir: cache.root,
+            registryConfigurationPath: registryConfigurationPath,
+            defaultRegistryURL: defaultRegistryURL,
+            disableSandbox: disableSandbox,
+            scmToRegistryTransformation: scmToRegistryTransformation,
+            useExistingResolvedFile: useExistingResolvedFile,
+            writeResolvedFile: writeResolvedFile
         )
-        do {
-            var resolved = try await resolveWithSwiftPackageManagerProcess(
-                packageDir: resolutionInput.packageDir,
-                scratchDir: scratchDir,
-                cacheDir: cache.root,
-                registryConfigurationPath: registryConfigurationPath,
-                defaultRegistryURL: defaultRegistryURL,
-                disableSandbox: disableSandbox,
-                scmToRegistryTransformation: resolutionInput.swiftPMTransformation,
-                useExistingResolvedFile: useExistingResolvedFile,
-                writeResolvedFile: writeResolvedFile
-            )
-            resolved.originHash = originHash
-            resolved.pins = applyRegistryIdentityOverrides(
-                resolved.pins,
-                pinOverrides: resolutionInput.pinOverrides
-            )
-            resolved.pins = dedupePinsByIdentity(resolved.pins)
-            resolved.pins.sort { $0.identity < $1.identity }
-            if writeResolvedFile {
-                // SwiftPM writes Package.resolved first; rewrite the root file with our
-                // originHash and pin overrides.
-                try await ResolvedFile.write(packageDir: packageDir, resolved: resolved)
-            }
-            if let cleanupDirectory = resolutionInput.cleanupDirectory {
-                try? await fileSystem.removePath(cleanupDirectory)
-            }
-            progress?.finished(pinCount: resolved.pins.count)
-            return resolved
-        } catch {
-            if let cleanupDirectory = resolutionInput.cleanupDirectory {
-                try? await fileSystem.removePath(cleanupDirectory)
-            }
-            throw error
+        resolved.originHash = originHash
+        resolved.pins = dedupePinsByIdentity(resolved.pins)
+        // Match SwiftPM's case-insensitive identity sort so the lockfile is
+        // byte-equivalent regardless of which tool wrote it.
+        resolved.pins.sort { $0.identity.lowercased() < $1.identity.lowercased() }
+        if writeResolvedFile {
+            // SwiftPM writes Package.resolved with its own originHash; rewrite
+            // with ours so consumers can detect manifest changes.
+            try await ResolvedFile.write(packageDir: packageDir, resolved: resolved)
         }
-    }
-
-    private struct SwiftPMResolutionInput {
-        let packageDir: URL
-        let cleanupDirectory: URL?
-        let pinOverrides: [String: PinOverride]
-        let swiftPMTransformation: SCMToRegistryTransformation
-    }
-
-    private static func swiftPMResolutionInput(
-        packageDir: URL,
-        cache: Cache,
-        registryConfig: RegistryConfig,
-        dependencies: [ManifestDependency],
-        scmToRegistryTransformation: SCMToRegistryTransformation
-    ) async throws -> SwiftPMResolutionInput {
-        guard scmToRegistryTransformation != .disabled else {
-            return SwiftPMResolutionInput(
-                packageDir: packageDir,
-                cleanupDirectory: nil,
-                pinOverrides: [:],
-                swiftPMTransformation: .disabled
-            )
-        }
-
-        let workspace = try await fileSystem.temporaryDirectory(
-            in: cache.root.appendingPathComponent("resolver-packages")
-        )
-        let prepared = try await registryPreparedDependencies(
-            dependencies,
-            packageDir: packageDir,
-            workspace: workspace,
-            cache: cache,
-            registryConfig: registryConfig,
-            scmToRegistryTransformation: scmToRegistryTransformation
-        )
-        let resolverPackage = try await writeResolverPackage(
-            dependencies: prepared.dependencies,
-            workspace: workspace
-        )
-        return SwiftPMResolutionInput(
-            packageDir: resolverPackage,
-            cleanupDirectory: workspace,
-            pinOverrides: prepared.pinOverrides,
-            swiftPMTransformation: .disabled
-        )
-    }
-
-    struct RegistryPreparedDependencies {
-        let dependencies: [ManifestDependency]
-        let pinOverrides: [String: PinOverride]
-    }
-
-    enum PinOverride: Equatable {
-        case registry(identity: String)
-        case sourceControlIdentity(String)
-    }
-
-    struct RegistryPreparationClient: Sendable {
-        let identifiers: @Sendable (String, RegistryConfig) async throws -> [String]
-        let versions: @Sendable (String, RegistryConfig, Cache) async throws -> [RegistryVersion]
-        let writeRegistryRepository:
-            @Sendable (String, [RegistryVersion], Requirement, URL, Cache, RegistryConfig)
-                async throws -> ManifestDependency
-
-        static let live = RegistryPreparationClient(
-            identifiers: { sourceControlURL, registryConfig in
-                try await RegistryClient.identifiers(
-                    sourceControlURL: sourceControlURL,
-                    registryConfig: registryConfig
-                )
-            },
-            versions: { identity, registryConfig, cache in
-                try await RegistryClient.versions(
-                    identity: identity,
-                    registryConfig: registryConfig,
-                    cache: cache
-                )
-            },
-            writeRegistryRepository: {
-                identity, versions, requirement, workspace, cache, registryConfig in
-                try await PackageResolver.writeRegistryRepository(
-                    identity: identity,
-                    versions: versions,
-                    requirement: requirement,
-                    workspace: workspace,
-                    cache: cache,
-                    registryConfig: registryConfig
-                )
-            }
-        )
-    }
-
-    static func registryPreparedDependencies(
-        _ dependencies: [ManifestDependency],
-        packageDir: URL,
-        workspace: URL,
-        cache: Cache,
-        registryConfig: RegistryConfig,
-        scmToRegistryTransformation: SCMToRegistryTransformation,
-        client: RegistryPreparationClient = .live
-    ) async throws -> RegistryPreparedDependencies {
-        var prepared: [ManifestDependency] = []
-        var pinOverrides: [String: PinOverride] = [:]
-
-        for dependency in dependencies {
-            guard dependency.kind == .sourceControl,
-                  let versionRange = ManifestParser.versionRange(for: dependency.requirement)
-            else {
-                prepared.append(dependency)
-                continue
-            }
-
-            let identifiers = try await client.identifiers(dependency.location, registryConfig)
-            guard let registryIdentity = identifiers.sorted().first else {
-                prepared.append(dependency)
-                continue
-            }
-
-            let sourceControlDependency = ManifestDependency(
-                identity: registryIdentity,
-                kind: .sourceControl,
-                location: dependency.location,
-                requirement: dependency.requirement,
-                nameForTargetDependencyResolutionOnly:
-                    dependency.nameForTargetDependencyResolutionOnly
-            )
-            switch scmToRegistryTransformation {
-            case .disabled:
-                prepared.append(dependency)
-            case .useRegistryIdentityForSCM:
-                prepared.append(sourceControlDependency)
-                addPinOverride(
-                    .sourceControlIdentity(registryIdentity),
-                    for: dependency.location,
-                    packageDir: packageDir,
-                    to: &pinOverrides
-                )
-            case .replaceSCMWithRegistry:
-                let versions = try await client.versions(registryIdentity, registryConfig, cache)
-                let compatibleRegistryVersions = versions.filter { version in
-                    guard let semver = version.semver else { return false }
-                    return versionRange.contains(semver)
-                }
-                if compatibleRegistryVersions.isEmpty {
-                    prepared.append(sourceControlDependency)
-                    addPinOverride(
-                        .sourceControlIdentity(registryIdentity),
-                        for: dependency.location,
-                        packageDir: packageDir,
-                        to: &pinOverrides
-                    )
-                } else {
-                    let registryRepository = try await client.writeRegistryRepository(
-                        registryIdentity,
-                        compatibleRegistryVersions,
-                        dependency.requirement,
-                        workspace,
-                        cache,
-                        registryConfig
-                    )
-                    prepared.append(registryRepository)
-                    addPinOverride(
-                        .registry(identity: registryIdentity),
-                        for: registryRepository.location,
-                        packageDir: packageDir,
-                        to: &pinOverrides
-                    )
-                }
-            }
-        }
-
-        return RegistryPreparedDependencies(
-            dependencies: prepared,
-            pinOverrides: pinOverrides
-        )
-    }
-
-    private static func addPinOverride(
-        _ override: PinOverride,
-        for location: String,
-        packageDir: URL,
-        to overrides: inout [String: PinOverride]
-    ) {
-        for alias in sourceControlLocationAliases(location, packageDir: packageDir) {
-            overrides[alias] = override
-        }
-    }
-
-    private static func sourceControlLocationAliases(_ location: String, packageDir: URL) -> [String] {
-        var aliases = [location]
-        var withoutTrailingSlash = location
-        while withoutTrailingSlash.hasSuffix("/") {
-            withoutTrailingSlash.removeLast()
-        }
-        if withoutTrailingSlash != location {
-            aliases.append(withoutTrailingSlash)
-        }
-        if withoutTrailingSlash.hasSuffix(".git") {
-            aliases.append(String(withoutTrailingSlash.dropLast(4)))
-        }
-        if location.hasPrefix("/") {
-            aliases.append(URL(fileURLWithPath: location).standardizedFileURL.path)
-        } else if let url = URL(string: location), url.isFileURL {
-            aliases.append(url.standardizedFileURL.path)
-        } else if URL(string: location)?.scheme == nil {
-            aliases.append(
-                packageDir.appendingPathComponent(location).standardizedFileURL.path
-            )
-        }
-        return Array(Set(aliases))
-    }
-
-    private static func applyRegistryIdentityOverrides(
-        _ pins: [ResolvedPin],
-        pinOverrides: [String: PinOverride]
-    ) -> [ResolvedPin] {
-        pins.map { pin in
-            guard PinKind.isSourceControl(pin.kind),
-                  let override = pinOverride(for: pin, pinOverrides: pinOverrides)
-            else {
-                return pin
-            }
-            switch override {
-            case .registry(let identity):
-                return ResolvedPin(
-                    identity: identity,
-                    kind: "registry",
-                    location: "",
-                    state: ResolvedState(branch: nil, revision: nil, version: pin.state.version)
-                )
-            case .sourceControlIdentity(let identity):
-                return ResolvedPin(
-                    identity: identity,
-                    kind: pin.kind,
-                    location: pin.location,
-                    state: pin.state
-                )
-            }
-        }
-    }
-
-    private static func pinOverride(
-        for pin: ResolvedPin,
-        pinOverrides: [String: PinOverride]
-    ) -> PinOverride? {
-        sourceControlLocationAliases(pin.location, packageDir: URL(fileURLWithPath: "/"))
-            .lazy
-            .compactMap { pinOverrides[$0] }
-            .first
-    }
-
-    private static func writeRegistryRepository(
-        identity: String,
-        versions: [RegistryVersion],
-        requirement: Requirement,
-        workspace: URL,
-        cache: Cache,
-        registryConfig: RegistryConfig
-    ) async throws -> ManifestDependency {
-        let repository = workspace
-            .appendingPathComponent("registry-repositories")
-            .appendingPathComponent(SafePathComponent.make(identity))
-        try await fileSystem.makeDirectory(
-            at: repository.absolutePath,
-            options: [.createTargetParentDirectories]
-        )
-        try await SystemProcess.run("git", ["init"], workingDirectory: repository)
-        try await SystemProcess.run(
-            "git", ["config", "user.name", "SwifterPM"], workingDirectory: repository)
-        try await SystemProcess.run(
-            "git", ["config", "user.email", "swifterpm@tuist.dev"], workingDirectory: repository)
-
-        for version in versions {
-            let pin = ResolvedPin(
-                identity: identity,
-                kind: "registry",
-                location: "",
-                state: ResolvedState(branch: nil, revision: nil, version: version.version)
-            )
-            let source = try await WorkspaceRestorer.ensureRegistrySource(
-                cache: cache,
-                registryConfig: registryConfig,
-                pin: pin
-            )
-            try await replaceRepositoryContents(repository: repository, source: source)
-            try await SystemProcess.run("git", ["add", "-A"], workingDirectory: repository)
-            try await SystemProcess.run(
-                "git",
-                ["commit", "--allow-empty", "-m", "\(identity) \(version.version)"],
-                workingDirectory: repository
-            )
-            try await SystemProcess.run("git", ["tag", version.version], workingDirectory: repository)
-        }
-
-        return ManifestDependency(
-            identity: identity,
-            kind: .sourceControl,
-            location: repository.path,
-            requirement: requirement
-        )
-    }
-
-    private static func replaceRepositoryContents(repository: URL, source: URL) async throws {
-        for entry in try await fileSystem.contentsOfDirectory(at: repository)
-            where entry.lastPathComponent != ".git"
-        {
-            try await fileSystem.removePath(entry)
-        }
-        for entry in try await fileSystem.contentsOfDirectory(at: source) {
-            try await fileSystem.copy(
-                entry.absolutePath,
-                to: repository.appendingPathComponent(entry.lastPathComponent).absolutePath
-            )
-        }
-    }
-
-    private static func writeResolverPackage(
-        dependencies: [ManifestDependency],
-        workspace: URL
-    ) async throws -> URL {
-        let packageDir = workspace.appendingPathComponent("package")
-        try await fileSystem.makeDirectory(
-            at: packageDir.absolutePath,
-            options: [.createTargetParentDirectories]
-        )
-        let dependencyLines = try dependencies.map { dependency in
-            try "        \(manifestDependency(dependency)),"
-        }.joined(separator: "\n")
-        try await fileSystem.atomicWrite(
-            """
-            // swift-tools-version:6.0
-            import PackageDescription
-
-            let package = Package(
-                name: "SwifterPMResolutionRoot",
-                dependencies: [
-            \(dependencyLines)
-                ]
-            )
-            """,
-            to: packageDir.appendingPathComponent("Package.swift")
-        )
-        return packageDir
-    }
-
-    private static func manifestDependency(_ dependency: ManifestDependency) throws -> String {
-        let requirement = try manifestRequirement(dependency.requirement)
-        switch dependency.kind {
-        case .registry:
-            return ".package(id: \(swiftStringLiteral(dependency.identity)), \(requirement))"
-        case .sourceControl:
-            return ".package(url: \(swiftStringLiteral(dependency.location)), \(requirement))"
-        }
-    }
-
-    private static func manifestRequirement(_ requirement: Requirement) throws -> String {
-        switch requirement {
-        case .exact(let version):
-            return "exact: \(swiftStringLiteral(version.description))"
-        case let .range(lower, upper):
-            return "\(swiftStringLiteral(lower.description))..<\(swiftStringLiteral(upper.description))"
-        case .revision(let revision):
-            return "revision: \(swiftStringLiteral(revision))"
-        case .branch(let branch):
-            return "branch: \(swiftStringLiteral(branch))"
-        }
-    }
-
-    private static func swiftStringLiteral(_ value: String) -> String {
-        let escaped = value
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        return "\"\(escaped)\""
+        progress?.finished(pinCount: resolved.pins.count)
+        return resolved
     }
 
     private struct ResolvedFileSnapshot {
@@ -675,8 +292,43 @@ enum PackageResolver {
     }
 
     private static func originHash(packageDir: URL) async throws -> String {
+        // Matches SwiftPM's `computeResolvedFileOriginHash`: for our single-
+        // package, no-extra-root-dependencies invocation shape, that function
+        // reduces to sha256 over the root Package.swift bytes.
         Hashing.sha256Hex(
             try await fileSystem.readFile(
                 at: packageDir.appendingPathComponent("Package.swift").absolutePath))
+    }
+
+    private static func packageToolsVersion(packageDir: URL) async throws -> (major: Int, minor: Int)? {
+        let data = try await fileSystem.readFile(
+            at: packageDir.appendingPathComponent("Package.swift").absolutePath)
+        guard let firstLine = String(data: data, encoding: .utf8)?
+            .split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+            .first
+        else { return nil }
+        let prefix = "swift-tools-version"
+        guard let colon = firstLine.range(of: prefix),
+              let version = firstLine[colon.upperBound...]
+                .drop(while: { $0 == ":" || $0.isWhitespace })
+                .split(separator: ".", maxSplits: 2, omittingEmptySubsequences: false)
+                .prefix(2)
+                .map(String.init) as [String]?,
+              version.count >= 2,
+              let major = Int(version[0]),
+              let minor = Int(version[1].prefix(while: { $0.isNumber }))
+        else { return nil }
+        return (major, minor)
+    }
+
+    private static func resolvedFileSchemaVersion(toolsVersion: (major: Int, minor: Int)?) -> Int {
+        guard let toolsVersion else { return 3 }
+        if toolsVersion.major > 5 || (toolsVersion.major == 5 && toolsVersion.minor > 9) {
+            return 3
+        }
+        if toolsVersion.major == 5 && toolsVersion.minor >= 6 {
+            return 2
+        }
+        return 1
     }
 }

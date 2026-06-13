@@ -28,7 +28,6 @@ struct Cache: Sendable {
         try await ConcurrentTasks.forEach([
             "registry/archives",
             "metadata/remotes",
-            "metadata/registries",
             "virtual/checkouts",
         ]) { path in
             try await fileSystem.makeDirectory(
@@ -113,13 +112,6 @@ struct Cache: Sendable {
         root
             .appendingPathComponent("metadata/remotes")
             .appendingPathComponent("\(Hashing.stable(location)).json")
-    }
-
-    func registryVersionsPath(registryURL: String, identity: String) -> URL {
-        root
-            .appendingPathComponent("metadata/registries")
-            .appendingPathComponent(
-                "\(Hashing.stable(registryURL))-\(Hashing.stable(identity)).json")
     }
 
     func lock(namespace: String, key: String) async throws -> PathLock {

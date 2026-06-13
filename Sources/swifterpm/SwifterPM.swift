@@ -13,6 +13,11 @@ public struct SwifterPMResolvedPin: Equatable, Sendable {
     public let branch: String?
     public let revision: String?
     public let version: String?
+    /// The SCM URL the pin was originally declared as before
+    /// `--replace-scm-with-registry` mapped it to a registry identity, when
+    /// applicable. Present so embedders can correlate registry pins back to
+    /// the manifest URL without re-querying the registry.
+    public let originalLocation: String?
 }
 
 public struct SwifterPMResolutionResult: Sendable {
@@ -252,5 +257,6 @@ extension SwifterPMResolvedPin {
         branch = pin.state.branch
         revision = pin.state.revision
         version = pin.state.version
+        originalLocation = pin.originalLocation
     }
 }

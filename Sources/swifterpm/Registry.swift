@@ -37,10 +37,6 @@ struct RegistryConfig: Sendable {
         throw ToolError.message("no registry configured for '\(scope)' scope")
     }
 
-    func sourceControlLookupRegistryURL() -> URL? {
-        defaultRegistryURL
-    }
-
     private mutating func mergeFile(_ path: URL) async throws {
         guard try await fileSystem.exists(path.absolutePath) else { return }
         guard
@@ -374,76 +370,7 @@ struct RegistrySourceArchive: Sendable {
     let checksum: String
 }
 
-struct RegistryVersion: Codable, Sendable {
-    let version: String
-
-    var semver: SemVer? {
-        try? SemVer(version)
-    }
-}
-
-private struct RegistryVersionsCache: Codable {
-    let registryURL: String
-    let identity: String
-    let versions: [RegistryVersion]
-}
-
 enum RegistryClient {
-    static func identifiers(
-        sourceControlURL: String,
-        registryConfig: RegistryConfig
-    ) async throws -> [String] {
-        guard let registryURL = registryConfig.sourceControlLookupRegistryURL() else {
-            return []
-        }
-        struct IdentifiersResponse: Decodable {
-            let identifiers: [String]
-        }
-
-        do {
-            let data = try await HTTPClient.data(
-                url: try identifiersURL(
-                    registryURL: registryURL,
-                    sourceControlURL: sourceControlURL
-                ),
-                headers: await headers(
-                    accept: "application/vnd.swift.registry.v1+json",
-                    registryURL: registryURL,
-                    registryConfig: registryConfig
-                )
-            )
-            return try JSONDecoder().decode(IdentifiersResponse.self, from: data).identifiers
-        } catch ToolError.message(let message) where message.hasPrefix("HTTP 404 ") {
-            return []
-        }
-    }
-
-    static func versions(identity: String, registryConfig: RegistryConfig, cache: Cache)
-        async throws
-        -> [RegistryVersion]
-    {
-        let registryURL = try registryConfig.registryURL(for: identity)
-        if let cached = try await readCachedRegistryVersions(
-            cache: cache, registryURL: registryURL.absoluteString, identity: identity)
-        {
-            return cached
-        }
-        let lock = try await cache.lock(
-            namespace: "registry-versions", key: "\(registryURL.absoluteString):\(identity)")
-        _ = lock
-        if let cached = try await readCachedRegistryVersions(
-            cache: cache, registryURL: registryURL.absoluteString, identity: identity)
-        {
-            return cached
-        }
-        let versions = try await fetchRegistryVersions(
-            registryURL: registryURL, identity: identity, registryConfig: registryConfig)
-        try await writeCachedRegistryVersions(
-            cache: cache, registryURL: registryURL.absoluteString, identity: identity,
-            versions: versions)
-        return versions
-    }
-
     static func sourceArchive(
         registryConfig: RegistryConfig,
         identity: String,
@@ -514,36 +441,6 @@ enum RegistryClient {
         }
         try? await fileSystem.removePath(archivePath)
         return false
-    }
-
-    private static func fetchRegistryVersions(
-        registryURL: URL,
-        identity: String,
-        registryConfig: RegistryConfig
-    ) async throws
-        -> [RegistryVersion]
-    {
-        struct ReleasesResponse: Decodable {
-            struct Release: Decodable { let problem: String? }
-            let releases: [String: Release]
-        }
-        let data = try await HTTPClient.data(
-            url: try packageURL(registryURL: registryURL, identity: identity),
-            headers: await headers(
-                accept: "application/vnd.swift.registry.v1+json",
-                registryURL: registryURL,
-                registryConfig: registryConfig
-            ))
-        let response = try JSONDecoder().decode(ReleasesResponse.self, from: data)
-        return response.releases.compactMap { version, release in
-            guard release.problem == nil, let semver = try? SemVer(version) else { return nil }
-            return RegistryVersion(version: semver.description)
-        }.sorted {
-            SemVer.ascendingForSort(
-                $0.semver ?? SemVer(major: 0, minor: 0, patch: 0),
-                $1.semver ?? SemVer(major: 0, minor: 0, patch: 0)
-            )
-        }
     }
 
     private static func fetchSourceArchiveChecksum(
@@ -624,47 +521,6 @@ enum RegistryClient {
         return registryURL.appendingPathComponents(components)
     }
 
-    private static func identifiersURL(registryURL: URL, sourceControlURL: String) throws -> URL {
-        var components = URLComponents(
-            url: registryURL.appendingPathComponent("identifiers"),
-            resolvingAgainstBaseURL: false
-        )
-        components?.queryItems = [URLQueryItem(name: "url", value: sourceControlURL)]
-        guard let url = components?.url else {
-            throw ToolError.message("invalid registry identifier lookup URL")
-        }
-        return url
-    }
-
-    private static func readCachedRegistryVersions(
-        cache: Cache, registryURL: String, identity: String
-    ) async throws -> [RegistryVersion]? {
-        let path = cache.registryVersionsPath(registryURL: registryURL, identity: identity)
-        guard try await fileSystem.exists(path.absolutePath) else { return nil }
-        if let modified = try await fileSystem.fileMetadata(at: path.absolutePath)?.lastModificationDate,
-            Date().timeIntervalSince(modified) > 60 * 60
-        {
-            return nil
-        }
-        let cached = try JSONDecoder().decode(
-            RegistryVersionsCache.self, from: try await fileSystem.readFile(at: path.absolutePath))
-        guard cached.registryURL == registryURL, cached.identity == identity else { return nil }
-        return cached.versions
-    }
-
-    private static func writeCachedRegistryVersions(
-        cache: Cache, registryURL: String, identity: String, versions: [RegistryVersion]
-    ) async throws {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data =
-            try encoder.encode(
-                RegistryVersionsCache(
-                    registryURL: registryURL, identity: identity, versions: versions))
-            + Data("\n".utf8)
-        try await fileSystem.atomicWrite(
-            data, to: cache.registryVersionsPath(registryURL: registryURL, identity: identity))
-    }
 }
 
 private extension Array where Element == String {

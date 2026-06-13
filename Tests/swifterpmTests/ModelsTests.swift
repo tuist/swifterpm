@@ -103,6 +103,40 @@ struct ModelsTests {
     }
 
     @Test
+    func resolvedPinRoundTripsOriginalLocationFromReplaceSCMWithRegistry() async throws {
+        // SwiftPM emits `originalLocation` on pins it rewrote via
+        // --replace-scm-with-registry so the next resolve can skip the
+        // registry identifier lookup. Dropping it on the read/write
+        // roundtrip means subsequent resolves needlessly hit the registry
+        // again.
+        try await withTemporaryDirectory { root in
+            try await writeMinimalPackageManifest(at: root, name: "Fixture")
+            let resolved = try ResolvedPins(
+                originHash: await ResolvedFile.packageOriginHash(packageDir: root),
+                pins: [
+                    ResolvedPin(
+                        identity: "apple.swift-log",
+                        kind: "registry",
+                        location: "",
+                        state: ResolvedState(branch: nil, revision: nil, version: "1.5.0"),
+                        originalLocation: "https://github.com/apple/swift-log.git"
+                    ),
+                ],
+                version: 3
+            )
+
+            try await ResolvedFile.write(packageDir: root, resolved: resolved)
+            let readBack = try await ResolvedFile.read(packageDir: root)
+            #expect(readBack.pins.first?.originalLocation == "https://github.com/apple/swift-log.git")
+
+            let resolvedFilePath = root.appendingPathComponent("Package.resolved")
+            let rawData = try await fileSystem.readFile(at: resolvedFilePath.absolutePath)
+            let rawContents = try #require(String(data: rawData, encoding: .utf8))
+            #expect(rawContents.contains("\"originalLocation\""))
+        }
+    }
+
+    @Test
     func writePreservesDeclaredLocationsAndSkipsIdenticalRewrites() async throws {
         try await withTemporaryDirectory { root in
             try await writeMinimalPackageManifest(at: root, name: "Fixture")
