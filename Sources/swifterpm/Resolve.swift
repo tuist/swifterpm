@@ -63,7 +63,8 @@ enum PackageResolver {
             disableSandbox: disableSandbox,
             scmToRegistryTransformation: scmToRegistryTransformation,
             useExistingResolvedFile: useExistingResolvedFile,
-            writeResolvedFile: writeResolvedFile
+            writeResolvedFile: writeResolvedFile,
+            forwardOutput: progress != nil
         )
         resolved.originHash = originHash
         resolved.pins = dedupePinsByIdentity(resolved.pins)
@@ -92,7 +93,8 @@ enum PackageResolver {
         disableSandbox: Bool,
         scmToRegistryTransformation: SCMToRegistryTransformation,
         useExistingResolvedFile: Bool,
-        writeResolvedFile: Bool
+        writeResolvedFile: Bool,
+        forwardOutput: Bool
     ) async throws -> ResolvedPins {
         let resolvedPath = packageDir.appendingPathComponent("Package.resolved")
         let snapshot =
@@ -114,7 +116,8 @@ enum PackageResolver {
                     disableSandbox: disableSandbox,
                     scmToRegistryTransformation: scmToRegistryTransformation
                 ),
-                workingDirectory: packageDir
+                workingDirectory: packageDir,
+                forwardOutput: forwardOutput
             )
             let resolved = try await ResolvedFile.read(packageDir: packageDir)
             if !writeResolvedFile, let snapshot {

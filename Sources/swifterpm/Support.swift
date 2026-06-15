@@ -56,8 +56,26 @@ enum SystemProcess {
         _ arguments: [String],
         workingDirectory: URL? = nil,
         environment: [String: String] = [:],
+        forwardOutput: Bool = false,
         outputLimit: Int = 64 * 1024 * 1024
     ) async throws -> Result {
+        if forwardOutput {
+            let result = try await Subprocess.run(
+                subprocessExecutable(executable),
+                arguments: Arguments(arguments),
+                environment: subprocessEnvironment(environment),
+                workingDirectory: workingDirectory.map { FilePath($0.path) },
+                output: .standardOutput,
+                error: .standardError
+            )
+
+            guard result.terminationStatus.isSuccess else {
+                throw ToolError.message(result.terminationStatus.description)
+            }
+
+            return Result(stdout: Data(), stderr: Data())
+        }
+
         let result = try await Subprocess.run(
             subprocessExecutable(executable),
             arguments: Arguments(arguments),
