@@ -26,6 +26,63 @@ extension AbsolutePath {
     }
 }
 
+extension URL {
+    /// Path of `self` expressed relative to `base`, using `..` components as needed.
+    /// Returns `"."` when `self` and `base` refer to the same path.
+    /// Used to keep `.build/workspace-state.json` and the swifterpm package-info index
+    /// relocatable: paths are anchored to `scratchDir` so a cached `.build/` works
+    /// after the project tree moves to a different absolute location.
+    func relativePathString(to base: URL) throws -> String {
+        let relative = try absolutePath.relative(to: base.absolutePath).pathString
+        return relative.isEmpty ? "." : relative
+    }
+
+    /// Returns `self` encoded relative to `scratchDir` only when it lives inside
+    /// `packageDir`; otherwise returns the absolute path verbatim.
+    ///
+    /// This scopes the relative-path encoding to paths that are part of the consuming
+    /// project (its scratch dir, in-tree binaries, and in-tree fileSystem deps). Paths
+    /// that point outside the project tree (e.g. an external local fileSystem or
+    /// `localSourceControl` dep on another disk location) are host-specific by nature
+    /// and keep their absolute form, matching SwiftPM's `workspace-state.json` so the
+    /// e2e differential suite still holds for those entries.
+    func pathRelativeToScratchIfInsidePackage(
+        scratchDir: URL, packageDir: URL
+    ) throws -> String {
+        // Relativize when this URL lives under either the project root (packageDir) or
+        // the scratch dir. Both are project-scoped, so paths inside either are part of
+        // the cacheable `.build/`-rooted unit. Paths outside both (typically external
+        // local fileSystem / localSourceControl deps) stay absolute so SwiftPM-compat
+        // against the e2e differential suite still holds for those entries.
+        //
+        // We normalize the macOS `/private/var` vs `/var` symlink layer with a string
+        // substitution rather than POSIX `realpath`. realpath follows every symlink,
+        // and on developer machines `<scratch>/swifterpm/artifacts/<id>/<target>` is a
+        // symlink into the global cache; following it would make a path that's
+        // logically inside scratch look like it lives outside.
+        let selfNormalized = Self.normalizedPathString(path)
+        let packageNormalized = Self.normalizedPathString(packageDir.path)
+        let scratchNormalized = Self.normalizedPathString(scratchDir.path)
+
+        let selfAbs = try AbsolutePath(validating: selfNormalized)
+        let packageAbs = try AbsolutePath(validating: packageNormalized)
+        let scratchAbs = try AbsolutePath(validating: scratchNormalized)
+
+        let packageRelative = packageAbs == selfAbs ? "" : try selfAbs.relative(to: packageAbs).pathString
+        let scratchRelative = scratchAbs == selfAbs ? "" : try selfAbs.relative(to: scratchAbs).pathString
+        let insidePackage = !packageRelative.hasPrefix("..")
+        let insideScratch = !scratchRelative.hasPrefix("..")
+        guard insidePackage || insideScratch else {
+            return path
+        }
+        return scratchRelative.isEmpty ? "." : scratchRelative
+    }
+
+    private static func normalizedPathString(_ value: String) -> String {
+        value.replacingOccurrences(of: "/private/var/", with: "/var/")
+    }
+}
+
 extension FileSystem {
     /// Write `data` atomically by writing to a temp sibling and then replacing the destination.
     /// Creates parent directories if missing.

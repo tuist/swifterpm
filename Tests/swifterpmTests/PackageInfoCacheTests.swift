@@ -29,12 +29,15 @@ struct PackageInfoCacheTests {
                 JSONSerialization.jsonObject(
                     with: try await fileSystem.readFile(at: indexPath.absolutePath))
                     as? [String: Any])
-            #expect(index["schema_version"] as? Int == 1)
+            #expect(index["schema_version"] as? Int == 2)
             #expect((index["packages"] as? [[String: Any]])?.isEmpty == true)
 
             let rootEntry = try #require(index["root"] as? [String: Any])
             #expect(rootEntry["identity"] as? String == "root")
             #expect(rootEntry["revision"] as? String == "origin")
+            #expect(
+                rootEntry["package_path"] as? String
+                    == (try package.relativePathString(to: scratch)))
         }
     }
 
@@ -193,12 +196,20 @@ struct PackageInfoCacheTests {
                 packages.compactMap { $0["identity"] as? String } == [
                     "local-one", "local-two",
                 ])
-            #expect(
-                packages.first?["package_path"] as? String
-                    == PathCanonicalizer.realpath(localOne).path)
+            // LocalOne is inside packageDir; encoded relative to scratch via packageDir.
+            // LocalTwo lives outside packageDir; stays absolute.
+            #expect(packages.first?["package_path"] as? String == "../Package/LocalOne")
             for package in packages {
-                let packageInfoPath = try #require(package["package_info_path"] as? String)
-                #expect(try await fileSystem.exists(URL(fileURLWithPath: packageInfoPath).absolutePath))
+                let pathString = try #require(package["package_info_path"] as? String)
+                // cacheDir is a sibling of scratch and outside packageDir in this test
+                // setup, so package_info_path stays absolute. Real Tuist projects place
+                // cacheDir at <scratch>/swifterpm/package-info which keeps it relative.
+                let resolvedURL: URL = if pathString.hasPrefix("/") {
+                    URL(fileURLWithPath: pathString)
+                } else {
+                    scratch.appendingPathComponent(pathString).standardizedFileURL
+                }
+                #expect(try await fileSystem.exists(resolvedURL.absolutePath))
             }
         }
     }
