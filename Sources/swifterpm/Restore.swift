@@ -522,6 +522,7 @@ enum WorkspaceRestorer {
         var result: [BinaryArtifact] = []
         let entries = try await fileSystem.contentsOfDirectory(at: directory)
         for entry in entries.sorted(by: { $0.path < $1.path }) {
+            guard !isMacOSMetadataPath(entry) else { continue }
             guard fileSystem.isDirectoryAndNotSymlink(entry) else { continue }
             if entry.pathExtension == "xcframework" {
                 result.append(BinaryArtifact(path: entry, kind: ["xcframework": [:]]))
@@ -533,6 +534,10 @@ enum WorkspaceRestorer {
             }
         }
         return result
+    }
+
+    private static func isMacOSMetadataPath(_ url: URL) -> Bool {
+        return url.lastPathComponent == "__MACOSX"
     }
 
     private static func shouldStripFirstLevel(

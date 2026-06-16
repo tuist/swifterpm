@@ -363,6 +363,98 @@ struct RestoreTests {
     }
 
     @Test
+    func restorePackageIgnoresMacOSMetadataBinaryArtifacts() async throws {
+        try await withTemporaryDirectory { root in
+            let package = root.appendingPathComponent("Package")
+            let scratch = root.appendingPathComponent("scratch")
+            let cache = try await Cache(root: root.appendingPathComponent("cache"))
+            let pin = ResolvedPin(
+                identity: "binary",
+                kind: "remoteSourceControl",
+                location: "https://github.com/example/binary.git",
+                state: ResolvedState(
+                    branch: nil,
+                    revision: "abcdef1234567890",
+                    version: "1.0.0"
+                )
+            )
+            let artifactURL = "https://example.com/Foo.zip"
+
+            let archiveRoot = root.appendingPathComponent("archive")
+            let framework = archiveRoot.appendingPathComponent("Foo.xcframework")
+            try await fileSystem.makeDirectory(
+                at: framework.absolutePath,
+                options: [.createTargetParentDirectories]
+            )
+            try await fileSystem.atomicWrite(
+                validXCFrameworkInfoPlist(),
+                to: framework.appendingPathComponent("Info.plist")
+            )
+            let metadataFramework = archiveRoot
+                .appendingPathComponent("__MACOSX")
+                .appendingPathComponent("Foo.xcframework")
+            try await fileSystem.makeDirectory(
+                at: metadataFramework.absolutePath,
+                options: [.createTargetParentDirectories]
+            )
+            try await fileSystem.atomicWrite(
+                validXCFrameworkInfoPlist(),
+                to: metadataFramework.appendingPathComponent("Info.plist")
+            )
+            let zipPath = root.appendingPathComponent("Foo.zip")
+            try await SystemProcess.run(
+                "/usr/bin/zip",
+                ["-qry", zipPath.path, "Foo.xcframework", "__MACOSX"],
+                workingDirectory: archiveRoot
+            )
+            let checksum = try Hashing.sha256Hex(await fileSystem.readFile(at: zipPath.absolutePath))
+            let archivePath = cache.binaryArtifactArchivePath(url: artifactURL, checksum: checksum)
+            try await fileSystem.makeDirectory(at: archivePath.deletingLastPathComponent().absolutePath, options: [.createTargetParentDirectories])
+            try await fileSystem.write(
+                await fileSystem.readFile(at: zipPath.absolutePath),
+                to: archivePath
+            )
+
+            try await writeCachedManifest(
+                binaryTargetManifest(name: "Foo", url: artifactURL, checksum: checksum),
+                packageDir: cache.sourcePath(pin: pin)
+            )
+            try await writeCachedManifest(emptyManifest(), packageDir: package)
+
+            let resolved = ResolvedPins(originHash: "origin", pins: [pin], version: 3)
+            try await WorkspaceRestorer.restorePackage(
+                scratchDir: scratch,
+                packageDir: package,
+                cache: cache,
+                registryConfig: RegistryConfig(),
+                resolved: resolved,
+                progress: nil
+            )
+            try await WorkspaceRestorer.writeWorkspaceState(
+                packageDir: package, scratchDir: scratch, resolved: resolved, disableSandbox: false
+            )
+
+            let statePath = scratch.appendingPathComponent("workspace-state.json")
+            let state = try #require(
+                try JSONSerialization.jsonObject(
+                    with: await fileSystem.readFile(at: statePath.absolutePath))
+                    as? [String: Any])
+            let object = try #require(state["object"] as? [String: Any])
+            let artifacts = try #require(object["artifacts"] as? [[String: Any]])
+            let artifact = try #require(artifacts.first)
+            let artifactPath = scratch
+                .appendingPathComponent("swifterpm/artifacts/binary/Foo/Foo.xcframework")
+            let metadataPath = scratch
+                .appendingPathComponent("swifterpm/artifacts/binary/Foo/__MACOSX/Foo.xcframework")
+
+            #expect(artifacts.count == 1)
+            #expect(artifact["path"] as? String == artifactPath.path)
+            #expect(try await fileSystem.exists(artifactPath.absolutePath))
+            #expect(try await fileSystem.exists(metadataPath.absolutePath))
+        }
+    }
+
+    @Test
     func restorePackageRedownloadsRemoteBinaryArtifactWhenCachedArchiveChecksumMismatches()
         async throws
     {
