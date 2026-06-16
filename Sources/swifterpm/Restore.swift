@@ -299,6 +299,10 @@ enum WorkspaceRestorer {
                 "/usr/bin/unzip",
                 ["-q", archivePath.path, "-d", temp.path]
             )
+            // Strip the macOS resource-fork sidecar that Finder-zipped archives carry. It
+            // contains a shadow copy of each bundle (no Info.plist) which downstream scanners
+            // would otherwise pick up and reject as a malformed xcframework.
+            try await removeResourceForkDirectories(in: temp)
             if try await shouldStripFirstLevel(
                 archiveDirectory: temp,
                 acceptableExtensions: ["artifactbundle", "xcframework"]
@@ -523,6 +527,7 @@ enum WorkspaceRestorer {
         let entries = try await fileSystem.contentsOfDirectory(at: directory)
         for entry in entries.sorted(by: { $0.path < $1.path }) {
             guard fileSystem.isDirectoryAndNotSymlink(entry) else { continue }
+            if entry.lastPathComponent == "__MACOSX" { continue }
             if entry.pathExtension == "xcframework" {
                 result.append(BinaryArtifact(path: entry, kind: ["xcframework": [:]]))
             } else if entry.pathExtension == "artifactbundle" {
@@ -533,6 +538,13 @@ enum WorkspaceRestorer {
             }
         }
         return result
+    }
+
+    private static func removeResourceForkDirectories(in directory: URL) async throws {
+        let entries = try await fileSystem.contentsOfDirectory(at: directory)
+        for entry in entries where entry.lastPathComponent == "__MACOSX" {
+            try await fileSystem.removePath(entry)
+        }
     }
 
     private static func shouldStripFirstLevel(

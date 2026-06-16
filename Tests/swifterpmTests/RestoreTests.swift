@@ -462,7 +462,65 @@ struct RestoreTests {
         }
     }
 
-    private func makeXCFrameworkZip(root: URL, targetName: String) async throws -> URL {
+    @Test
+    func restorePackageIgnoresMacOSResourceForkShadowFramework() async throws {
+        try await withTemporaryDirectory { root in
+            let package = root.appendingPathComponent("Package")
+            let scratch = root.appendingPathComponent("scratch")
+            let cache = try await Cache(root: root.appendingPathComponent("cache"))
+            let zipPath = try await makeXCFrameworkZip(
+                root: root,
+                targetName: "Foo",
+                includeMacOSResourceFork: true
+            )
+            try await writeCachedManifest(
+                localBinaryTargetManifest(name: "Foo", path: "Foo.zip"),
+                packageDir: package
+            )
+            try await fileSystem.write(
+                await fileSystem.readFile(at: zipPath.absolutePath),
+                to: package.appendingPathComponent("Foo.zip")
+            )
+
+            let resolved = ResolvedPins(originHash: "origin", pins: [], version: 3)
+            try await WorkspaceRestorer.restorePackage(
+                scratchDir: scratch,
+                packageDir: package,
+                cache: cache,
+                registryConfig: RegistryConfig(),
+                resolved: resolved,
+                progress: nil
+            )
+            try await WorkspaceRestorer.writeWorkspaceState(
+                packageDir: package, scratchDir: scratch, resolved: resolved, disableSandbox: false
+            )
+
+            let artifactPath = scratch
+                .appendingPathComponent("swifterpm/artifacts/package/Foo/Foo.xcframework")
+            let shadowPath = scratch
+                .appendingPathComponent("swifterpm/artifacts/package/Foo/__MACOSX")
+            #expect(try await fileSystem.exists(artifactPath.absolutePath))
+            #expect(try await fileSystem.exists(artifactPath.appendingPathComponent("Info.plist").absolutePath))
+            #expect(try await !fileSystem.exists(shadowPath.absolutePath))
+
+            let statePath = scratch.appendingPathComponent("workspace-state.json")
+            let state = try #require(
+                try JSONSerialization.jsonObject(
+                    with: await fileSystem.readFile(at: statePath.absolutePath))
+                    as? [String: Any])
+            let object = try #require(state["object"] as? [String: Any])
+            let artifacts = try #require(object["artifacts"] as? [[String: Any]])
+            let artifact = try #require(artifacts.first)
+            #expect(artifacts.count == 1)
+            #expect(artifact["path"] as? String == artifactPath.path)
+        }
+    }
+
+    private func makeXCFrameworkZip(
+        root: URL,
+        targetName: String,
+        includeMacOSResourceFork: Bool = false
+    ) async throws -> URL {
         let archiveRoot = root.appendingPathComponent("archive")
         let framework = archiveRoot.appendingPathComponent("\(targetName).xcframework")
         try await fileSystem.makeDirectory(at: framework.absolutePath, options: [.createTargetParentDirectories])
@@ -471,9 +529,23 @@ struct RestoreTests {
             to: framework.appendingPathComponent("Info.plist")
         )
         let zipPath = root.appendingPathComponent("\(targetName).zip")
+        var zipArguments = ["-qry", zipPath.path, "\(targetName).xcframework"]
+        if includeMacOSResourceFork {
+            let shadow = archiveRoot
+                .appendingPathComponent("__MACOSX")
+                .appendingPathComponent("\(targetName).xcframework")
+            try await fileSystem.makeDirectory(
+                at: shadow.absolutePath, options: [.createTargetParentDirectories]
+            )
+            try await fileSystem.atomicWrite(
+                "shadow",
+                to: shadow.appendingPathComponent("._Info.plist")
+            )
+            zipArguments.append("__MACOSX")
+        }
         try await SystemProcess.run(
             "/usr/bin/zip",
-            ["-qry", zipPath.path, "\(targetName).xcframework"],
+            zipArguments,
             workingDirectory: archiveRoot
         )
         return zipPath
