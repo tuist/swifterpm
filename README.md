@@ -142,18 +142,18 @@ Add `--tuist-source ../tuist` to use a local Tuist checkout instead of cloning `
 
 The script writes Markdown and JSON reports under `benchmark-results`.
 
-Representative one-run sample from the corrected cache-isolated setup, generated on Apple Swift 6.3.2:
+Representative one-run sample from the latest cache-isolated setup, generated on Apple Swift 6.3.2:
 
 | Codebase | Scenario | SwiftPM | swifterpm | Time reduction | Speedup |
 |:---|:---|---:|---:|---:|---:|
-| Pocket Casts iOS `Modules/Package.swift` | Cold | 469.800 s | 240.750 s | 48.75% | 1.95x |
-| Pocket Casts iOS `Modules/Package.swift` | Worktree-warm | 109.585 s | 0.768 s | 99.30% | 142.67x |
-| Firefox iOS root `Package.swift` | Cold | 127.741 s | 12.734 s | 90.03% | 10.03x |
-| Firefox iOS root `Package.swift` | Worktree-warm | 6.165 s | 0.562 s | 90.88% | 10.97x |
-| Tuist root `Package.swift` | Cold | 135.548 s | 122.939 s | 9.30% | 1.10x |
-| Tuist root `Package.swift` | Worktree-warm | 60.111 s | 1.340 s | 97.77% | 44.87x |
-| SwiftNIO fixture `third_party/nio/Package.swift` | Cold | 74.284 s | 29.678 s | 60.05% | 2.50x |
-| SwiftNIO fixture `third_party/nio/Package.swift` | Worktree-warm | 10.178 s | 0.436 s | 95.72% | 23.34x |
+| Pocket Casts iOS `Modules/Package.swift` | Cold | 438.106 s | 258.544 s | 40.99% | 1.69x |
+| Pocket Casts iOS `Modules/Package.swift` | Worktree-warm | 101.048 s | 0.502 s | 99.50% | 201.15x |
+| Firefox iOS root `Package.swift` | Cold | 107.358 s | 11.738 s | 89.07% | 9.15x |
+| Firefox iOS root `Package.swift` | Worktree-warm | 4.471 s | 0.421 s | 90.59% | 10.63x |
+| Tuist root `Package.swift` | Cold | 131.391 s | 109.059 s | 17.00% | 1.20x |
+| Tuist root `Package.swift` | Worktree-warm | 33.290 s | 1.484 s | 95.54% | 22.44x |
+| SwiftNIO fixture `third_party/nio/Package.swift` | Cold | 5.535 s | 7.120 s | -28.63% | 0.78x |
+| SwiftNIO fixture `third_party/nio/Package.swift` | Worktree-warm | 1.945 s | 0.217 s | 88.84% | 8.96x |
 
 Cold resolution removes package-local scratch directories plus each tool's benchmark-local shared cache before each measured run. Worktree-warm resolution removes package-local scratch directories before each measured run while keeping each tool's already-primed benchmark-local shared cache, which models switching to another clean worktree.
 
