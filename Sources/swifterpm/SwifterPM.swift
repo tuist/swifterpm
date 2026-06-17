@@ -6,6 +6,12 @@ public enum SCMToRegistryTransformation: Equatable, Sendable {
     case replaceSCMWithRegistry
 }
 
+public enum SwifterPMCachedDirectoryMaterialization: String, CaseIterable, Equatable, Sendable {
+    case automatic
+    case copy
+    case symlink
+}
+
 public struct SwifterPMResolvedPin: Equatable, Sendable {
     public let identity: String
     public let kind: String
@@ -39,6 +45,7 @@ public struct SwifterPMResolutionRequest: Sendable {
     public var disablePackageInfoCache: Bool
     public var packageInfoCacheDirectory: URL?
     public var scmToRegistryTransformation: SCMToRegistryTransformation
+    public var cachedDirectoryMaterialization: SwifterPMCachedDirectoryMaterialization?
     public var quiet: Bool
 
     public init(
@@ -55,6 +62,7 @@ public struct SwifterPMResolutionRequest: Sendable {
         disablePackageInfoCache: Bool = false,
         packageInfoCacheDirectory: URL? = nil,
         scmToRegistryTransformation: SCMToRegistryTransformation = .disabled,
+        cachedDirectoryMaterialization: SwifterPMCachedDirectoryMaterialization? = nil,
         quiet: Bool = false
     ) {
         self.packageDirectory = packageDirectory
@@ -70,6 +78,7 @@ public struct SwifterPMResolutionRequest: Sendable {
         self.disablePackageInfoCache = disablePackageInfoCache
         self.packageInfoCacheDirectory = packageInfoCacheDirectory
         self.scmToRegistryTransformation = scmToRegistryTransformation
+        self.cachedDirectoryMaterialization = cachedDirectoryMaterialization
         self.quiet = quiet
     }
 }
@@ -83,6 +92,7 @@ public struct SwifterPMRestoreRequest: Sendable {
     public var disableSandbox: Bool
     public var disablePackageInfoCache: Bool
     public var packageInfoCacheDirectory: URL?
+    public var cachedDirectoryMaterialization: SwifterPMCachedDirectoryMaterialization?
     public var quiet: Bool
 
     public init(
@@ -94,6 +104,7 @@ public struct SwifterPMRestoreRequest: Sendable {
         disableSandbox: Bool = false,
         disablePackageInfoCache: Bool = false,
         packageInfoCacheDirectory: URL? = nil,
+        cachedDirectoryMaterialization: SwifterPMCachedDirectoryMaterialization? = nil,
         quiet: Bool = false
     ) {
         self.packageDirectory = packageDirectory
@@ -104,6 +115,7 @@ public struct SwifterPMRestoreRequest: Sendable {
         self.disableSandbox = disableSandbox
         self.disablePackageInfoCache = disablePackageInfoCache
         self.packageInfoCacheDirectory = packageInfoCacheDirectory
+        self.cachedDirectoryMaterialization = cachedDirectoryMaterialization
         self.quiet = quiet
     }
 }
@@ -114,16 +126,32 @@ public struct SwifterPM: Sendable {
     public func resolve(_ request: SwifterPMResolutionRequest) async throws
         -> SwifterPMResolutionResult
     {
-        try await runResolution(request: request, preferResolvedFile: true)
+        try await Environment.withCachedDirectoryMaterialization(
+            request.cachedDirectoryMaterialization
+        ) {
+            try await runResolution(request: request, preferResolvedFile: true)
+        }
     }
 
     public func update(_ request: SwifterPMResolutionRequest) async throws
         -> SwifterPMResolutionResult
     {
-        try await runResolution(request: request, preferResolvedFile: false)
+        try await Environment.withCachedDirectoryMaterialization(
+            request.cachedDirectoryMaterialization
+        ) {
+            try await runResolution(request: request, preferResolvedFile: false)
+        }
     }
 
     public func restore(_ request: SwifterPMRestoreRequest) async throws {
+        try await Environment.withCachedDirectoryMaterialization(
+            request.cachedDirectoryMaterialization
+        ) {
+            try await runRestore(request)
+        }
+    }
+
+    private func runRestore(_ request: SwifterPMRestoreRequest) async throws {
         let package = request.packageDirectory.standardizedFileURL
         let scratch = request.scratchDirectory ?? package.appendingPathComponent(".build")
         let cache = try await Cache(root: request.cacheDirectory)

@@ -55,6 +55,8 @@ mise x github:tuist/swifterpm@latest -- swifterpm --package-path . --force-resol
 
 Useful SwiftPM-shaped flags are supported, including `--package-path`, `--cache-path`, `--scratch-path`, `--build-path`, `--config-path`, `--default-registry-url`, `--skip-update`, `--force-resolved-versions`, `--disable-automatic-resolution`, and `--only-use-versions-from-resolved-file`.
 
+By default, `swifterpm` copies cached directories into the project scratch directory on CI and symlinks them elsewhere. Pass `--cached-directory-materialization symlink` to preserve global-cache symlinks on CI. The accepted values are `automatic`, `copy`, and `symlink`.
+
 > [!NOTE]
 > `swifterpm resolve` writes `Package.resolved` with an `originHash` derived from `Package.swift`, while SwiftPM derives its hash from the dependency graph. Running `swift package resolve` after `swifterpm resolve` in the same checkout may treat the lockfile as stale and resolve again.
 

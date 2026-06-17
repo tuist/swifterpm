@@ -50,6 +50,7 @@ struct CLI {
     var quiet = false
     var disablePackageInfoCache = false
     var packageInfoCachePath: CLIPath?
+    var cachedDirectoryMaterialization: SwifterPMCachedDirectoryMaterialization?
     var command: Command
 
     enum Command {
@@ -154,6 +155,7 @@ public enum SwifterPMCommandParser {
                     disableSandbox: cli.disableSandbox,
                     disablePackageInfoCache: cli.disablePackageInfoCache,
                     packageInfoCacheDirectory: paths.resolve(cli.packageInfoCachePath),
+                    cachedDirectoryMaterialization: cli.cachedDirectoryMaterialization,
                     quiet: cli.quiet
                 )
             )
@@ -188,6 +190,7 @@ public enum SwifterPMCommandParser {
             disablePackageInfoCache: cli.disablePackageInfoCache,
             packageInfoCacheDirectory: paths.resolve(cli.packageInfoCachePath),
             scmToRegistryTransformation: try CLIRunner.scmToRegistryTransformation(cli),
+            cachedDirectoryMaterialization: cli.cachedDirectoryMaterialization,
             quiet: cli.quiet
         )
     }
@@ -263,6 +266,9 @@ public struct SwifterPMCommand: AsyncParsableCommand {
     @Option(name: .customLong("package-info-cache-path"))
     var packageInfoCachePath: String?
 
+    @Option(name: .customLong("cached-directory-materialization"))
+    var cachedDirectoryMaterialization: SwifterPMCachedDirectoryMaterialization?
+
     @Argument
     var action: CLIAction
 
@@ -312,8 +318,15 @@ public struct SwifterPMCommand: AsyncParsableCommand {
             quiet: quiet,
             disablePackageInfoCache: disablePackageInfoCache,
             packageInfoCachePath: CLIPath.optional(packageInfoCachePath),
+            cachedDirectoryMaterialization: cachedDirectoryMaterialization,
             command: command
         )
+    }
+}
+
+extension SwifterPMCachedDirectoryMaterialization: ExpressibleByArgument {
+    public init?(argument: String) {
+        try? self.init(configurationValue: argument)
     }
 }
 
@@ -447,61 +460,65 @@ struct CLIPathResolver {
 
 enum CLIRunner {
     static func run(_ cli: CLI) async throws {
-        let paths = try await CLIPathResolver(chdir: cli.chdir)
+        try await Environment.withCachedDirectoryMaterialization(
+            cli.cachedDirectoryMaterialization
+        ) {
+            let paths = try await CLIPathResolver(chdir: cli.chdir)
 
-        switch cli.command {
-        case .resolve(let options):
-            try ensureWholePackageResolution(
-                packageName: options.packageName,
-                version: options.version,
-                branch: options.branch,
-                revision: options.revision
-            )
-            try await runResolutionCommand(
-                cli: cli,
-                paths: paths,
-                packageDir: options.packageDir,
-                cacheDir: options.cacheDir,
-                preferResolvedFile: true,
-                write: options.write,
-                restore: options.restore,
-                printOnly: options.printOnly
-            )
-        case .update(let options):
-            if !options.packageNames.isEmpty {
-                throw ToolError.message("package-specific update is not supported yet")
+            switch cli.command {
+            case .resolve(let options):
+                try ensureWholePackageResolution(
+                    packageName: options.packageName,
+                    version: options.version,
+                    branch: options.branch,
+                    revision: options.revision
+                )
+                try await runResolutionCommand(
+                    cli: cli,
+                    paths: paths,
+                    packageDir: options.packageDir,
+                    cacheDir: options.cacheDir,
+                    preferResolvedFile: true,
+                    write: options.write,
+                    restore: options.restore,
+                    printOnly: options.printOnly
+                )
+            case .update(let options):
+                if !options.packageNames.isEmpty {
+                    throw ToolError.message("package-specific update is not supported yet")
+                }
+                try await runResolutionCommand(
+                    cli: cli,
+                    paths: paths,
+                    packageDir: options.packageDir,
+                    cacheDir: options.cacheDir,
+                    preferResolvedFile: false,
+                    write: options.write,
+                    restore: options.restore,
+                    printOnly: options.printOnly
+                )
+            case .restore(let options):
+                let cache = try await Cache(
+                    root: cliCacheDir(cli: cli, paths: paths, commandCacheDir: options.cacheDir))
+                let package = canonicalPackageDir(
+                    commandPackageDir(
+                        cli: cli, paths: paths, commandPackageDir: options.packageDir))
+                let scratch = commandScratchDir(
+                    cli: cli, paths: paths, packageDir: package, commandScratchDir: options.scratchDir)
+                let registryConfig = try await cliRegistryConfig(
+                    cli: cli, paths: paths, package: package)
+                let resolved = try await ResolvedFile.read(packageDir: package)
+                try await WorkspaceRestorer.restorePackage(
+                    scratchDir: scratch, packageDir: package, cache: cache, registryConfig: registryConfig,
+                    resolved: resolved,
+                    progress: cli.quiet ? nil : RestoreProgressReporter(),
+                    disableSandbox: cli.disableSandbox)
+                try await maybeWritePackageInfoCache(
+                    cli: cli, paths: paths, package: package, scratch: scratch, resolved: resolved)
+                try await WorkspaceRestorer.writeWorkspaceState(
+                    packageDir: package, scratchDir: scratch, resolved: resolved,
+                    disableSandbox: cli.disableSandbox)
             }
-            try await runResolutionCommand(
-                cli: cli,
-                paths: paths,
-                packageDir: options.packageDir,
-                cacheDir: options.cacheDir,
-                preferResolvedFile: false,
-                write: options.write,
-                restore: options.restore,
-                printOnly: options.printOnly
-            )
-        case .restore(let options):
-            let cache = try await Cache(
-                root: cliCacheDir(cli: cli, paths: paths, commandCacheDir: options.cacheDir))
-            let package = canonicalPackageDir(
-                commandPackageDir(
-                    cli: cli, paths: paths, commandPackageDir: options.packageDir))
-            let scratch = commandScratchDir(
-                cli: cli, paths: paths, packageDir: package, commandScratchDir: options.scratchDir)
-            let registryConfig = try await cliRegistryConfig(
-                cli: cli, paths: paths, package: package)
-            let resolved = try await ResolvedFile.read(packageDir: package)
-            try await WorkspaceRestorer.restorePackage(
-                scratchDir: scratch, packageDir: package, cache: cache, registryConfig: registryConfig,
-                resolved: resolved,
-                progress: cli.quiet ? nil : RestoreProgressReporter(),
-                disableSandbox: cli.disableSandbox)
-            try await maybeWritePackageInfoCache(
-                cli: cli, paths: paths, package: package, scratch: scratch, resolved: resolved)
-            try await WorkspaceRestorer.writeWorkspaceState(
-                packageDir: package, scratchDir: scratch, resolved: resolved,
-                disableSandbox: cli.disableSandbox)
         }
     }
 
