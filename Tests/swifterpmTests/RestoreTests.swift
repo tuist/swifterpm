@@ -346,7 +346,7 @@ struct RestoreTests {
             let packageRef = try #require(artifact["packageRef"] as? [String: Any])
             let source = try #require(artifact["source"] as? [String: Any])
             let artifactPath = scratch
-                .appendingPathComponent("swifterpm/artifacts/binary/Foo/Foo.xcframework")
+                .appendingPathComponent("artifacts/binary/Foo/Foo.xcframework")
 
             #expect(artifacts.count == 1)
             #expect(artifact["targetName"] as? String == "Foo")
@@ -357,8 +357,6 @@ struct RestoreTests {
             #expect(source["url"] as? String == artifactURL)
             #expect(source["checksum"] as? String == checksum)
             #expect(try await fileSystem.exists(artifactPath.absolutePath))
-            #expect(
-                try await !fileSystem.exists(scratch.appendingPathComponent("artifacts/binary").absolutePath))
         }
     }
 
@@ -407,7 +405,7 @@ struct RestoreTests {
             )
 
             let artifactPath = scratch
-                .appendingPathComponent("swifterpm/artifacts/binary/Foo/Foo.xcframework")
+                .appendingPathComponent("artifacts/binary/Foo/Foo.xcframework")
             #expect(try await fileSystem.exists(archivePath.absolutePath))
             #expect(try Hashing.sha256Hex(fileAt: archivePath) == checksum)
             #expect(try await fileSystem.exists(artifactPath.absolutePath))
@@ -451,7 +449,7 @@ struct RestoreTests {
             _ = try await (first, second)
 
             let artifactPath = scratch
-                .appendingPathComponent("swifterpm/artifacts/package/Foo/Foo.xcframework")
+                .appendingPathComponent("artifacts/package/Foo/Foo.xcframework")
             let cachedArtifact = cache.binaryArtifactDirectory(
                 identity: "package",
                 targetName: "Foo",
@@ -496,9 +494,9 @@ struct RestoreTests {
             )
 
             let artifactPath = scratch
-                .appendingPathComponent("swifterpm/artifacts/package/Foo/Foo.xcframework")
+                .appendingPathComponent("artifacts/package/Foo/Foo.xcframework")
             let shadowPath = scratch
-                .appendingPathComponent("swifterpm/artifacts/package/Foo/__MACOSX")
+                .appendingPathComponent("artifacts/package/Foo/__MACOSX")
             #expect(try await fileSystem.exists(artifactPath.absolutePath))
             #expect(try await fileSystem.exists(artifactPath.appendingPathComponent("Info.plist").absolutePath))
             #expect(try await !fileSystem.exists(shadowPath.absolutePath))
