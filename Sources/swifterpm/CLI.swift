@@ -267,7 +267,7 @@ public struct SwifterPMCommand: AsyncParsableCommand {
     var packageInfoCachePath: String?
 
     @Option(name: .customLong("cached-directory-materialization"))
-    var cachedDirectoryMaterialization: String?
+    var cachedDirectoryMaterialization: SwifterPMCachedDirectoryMaterialization?
 
     @Argument
     var action: CLIAction
@@ -318,11 +318,15 @@ public struct SwifterPMCommand: AsyncParsableCommand {
             quiet: quiet,
             disablePackageInfoCache: disablePackageInfoCache,
             packageInfoCachePath: CLIPath.optional(packageInfoCachePath),
-            cachedDirectoryMaterialization: try cachedDirectoryMaterialization.map {
-                try SwifterPMCachedDirectoryMaterialization(configurationValue: $0)
-            },
+            cachedDirectoryMaterialization: cachedDirectoryMaterialization,
             command: command
         )
+    }
+}
+
+extension SwifterPMCachedDirectoryMaterialization: ExpressibleByArgument {
+    public init?(argument: String) {
+        try? self.init(configurationValue: argument)
     }
 }
 
