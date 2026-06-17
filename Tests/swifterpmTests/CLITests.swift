@@ -11,6 +11,7 @@ struct CLITests {
             "--scratch-path", "/tmp/scratch",
             "--disable-sandbox",
             "--default-registry-url", "https://registry.example.com",
+            "--cached-directory-materialization", "symlink",
             "-q",
             "resolve",
             "--package-dir", "/tmp/command-package",
@@ -25,6 +26,7 @@ struct CLITests {
         #expect(cli.disableSandbox)
         #expect(cli.quiet)
         #expect(cli.defaultRegistryURL == "https://registry.example.com")
+        #expect(cli.cachedDirectoryMaterialization == .symlink)
 
         guard case .resolve(let options) = cli.command else {
             Issue.record("expected resolve command")
@@ -144,6 +146,7 @@ struct CLITests {
                 "--skip-update",
                 "--replace-scm-with-registry",
                 "--package-info-cache-path", packageInfoCache.path,
+                "--cached-directory-materialization", "symlink",
                 "--quiet",
                 "resolve",
             ])
@@ -165,6 +168,7 @@ struct CLITests {
             #expect(request.disablePackageInfoCache == false)
             #expect(request.packageInfoCacheDirectory == packageInfoCache.standardizedFileURL)
             #expect(request.scmToRegistryTransformation == .replaceSCMWithRegistry)
+            #expect(request.cachedDirectoryMaterialization == .symlink)
             #expect(request.quiet)
         }
     }
@@ -215,6 +219,16 @@ struct CLITests {
             #expect(request.packageDirectory == package.standardizedFileURL)
             #expect(request.cacheDirectory == cache.standardizedFileURL)
             #expect(request.scratchDirectory == scratch.standardizedFileURL)
+        }
+    }
+
+    @Test
+    func parserRejectsInvalidCachedDirectoryMaterialization() {
+        #expect(throws: (any Error).self) {
+            try CLIParser.parse([
+                "--cached-directory-materialization", "hardlink",
+                "restore",
+            ])
         }
     }
 

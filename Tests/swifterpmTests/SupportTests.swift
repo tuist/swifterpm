@@ -96,6 +96,51 @@ struct SupportTests {
     }
 
     @Test
+    func cachedDirectoryReplacementSymlinksOnCIWhenConfigured() async throws {
+        try await Environment.$values.withValue([
+            "CI": "1",
+        ]) {
+            try await Environment.withCachedDirectoryMaterialization(.symlink) {
+                try await withTemporaryDirectory { root in
+                    let source = root.appendingPathComponent("source")
+                    let nested = source.appendingPathComponent("nested")
+                    let destination = root.appendingPathComponent("destination")
+                    try await fileSystem.makeDirectory(at: nested.absolutePath, options: [.createTargetParentDirectories])
+                    try await fileSystem.atomicWrite(
+                        "value", to: nested.appendingPathComponent("file.txt"))
+
+                    try await fileSystem.replaceWithCachedDirectory(
+                        source: source, destination: destination)
+
+                    #expect(!(fileSystem.isDirectoryAndNotSymlink(destination)))
+                    #expect(
+                        try await fileSystem.exists(destination.appendingPathComponent("nested/file.txt").absolutePath))
+                }
+            }
+        }
+    }
+
+    @Test
+    func cachedDirectoryReplacementCopiesOutsideCIWhenConfigured() async throws {
+        try await Environment.withCachedDirectoryMaterialization(.copy) {
+            try await withTemporaryDirectory { root in
+                let source = root.appendingPathComponent("source")
+                let destination = root.appendingPathComponent("destination")
+                try await fileSystem.makeDirectory(at: source.absolutePath, options: [.createTargetParentDirectories])
+                try await fileSystem.atomicWrite(
+                    "value", to: source.appendingPathComponent("file.txt"))
+
+                try await fileSystem.replaceWithCachedDirectory(
+                    source: source, destination: destination)
+
+                #expect(fileSystem.isDirectoryAndNotSymlink(destination))
+                #expect(
+                    try await fileSystem.exists(destination.appendingPathComponent("file.txt").absolutePath))
+            }
+        }
+    }
+
+    @Test
     func ciDetectionMatchesAubeEnvironmentLogic() async throws {
         Environment.$values.withValue([:]) {
             #expect(!Environment.isCI)

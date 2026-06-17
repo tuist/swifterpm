@@ -108,9 +108,9 @@ extension FileSystem {
         try await move(from: temp.absolutePath, to: url.absolutePath, options: [])
     }
 
-    /// Materialise `source` at `destination`, removing any existing item first. On CI runners the
-    /// directory is copied; otherwise we symlink (so callers see a stable path while the cached
-    /// payload stays shared).
+    /// Materialise `source` at `destination`, removing any existing item first. By default, CI
+    /// runners copy cached directories; other environments symlink so the cached payload stays
+    /// shared.
     func replaceWithCachedDirectory(source: URL, destination: URL) async throws {
         let destinationPath = try destination.absolutePath
         if existsIncludingSymlinks(destination) {
@@ -119,7 +119,7 @@ extension FileSystem {
         try await makeDirectory(
             at: destinationPath.parentDirectory, options: [.createTargetParentDirectories]
         )
-        if Environment.isCI {
+        if Environment.cachedDirectoryMaterializationMode().shouldCopyCachedDirectories {
             try await copy(source.absolutePath, to: destinationPath)
             return
         }
