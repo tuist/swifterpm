@@ -224,11 +224,17 @@ struct CLITests {
 
     @Test
     func parserRejectsInvalidCachedDirectoryMaterialization() {
-        #expect(throws: (any Error).self) {
-            try CLIParser.parse([
+        do {
+            _ = try CLIParser.parse([
                 "--cached-directory-materialization", "hardlink",
                 "restore",
             ])
+            Issue.record("expected parse to fail")
+        } catch {
+            let message = SwifterPMCommand.message(for: error)
+            #expect(message.contains("automatic"))
+            #expect(message.contains("copy"))
+            #expect(message.contains("symlink"))
         }
     }
 

@@ -6,7 +6,7 @@ public enum SCMToRegistryTransformation: Equatable, Sendable {
     case replaceSCMWithRegistry
 }
 
-public enum SwifterPMCachedDirectoryMaterialization: String, Equatable, Sendable {
+public enum SwifterPMCachedDirectoryMaterialization: String, CaseIterable, Equatable, Sendable {
     case automatic
     case copy
     case symlink
