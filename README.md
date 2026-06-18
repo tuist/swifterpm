@@ -2,6 +2,9 @@
 
 `swifterpm` is a faster Swift package restoration tool built for workflows where dependency resolution happens often, across many clean worktrees, and under heavy concurrency.
 
+> [!WARNING]
+> This repository has been moved to the [tuist/tuist monorepo](https://github.com/tuist/tuist)
+
 ## Motivation 🤖
 
 Concurrent package installation is becoming the default in a world of coding agents. A single developer may now have several agents resolving dependencies in parallel, often across different worktrees of the same project. In that world, slow resolution and duplicated package checkouts become very expensive.
