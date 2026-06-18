@@ -7,7 +7,7 @@ Review Swift changes for SwifterPM with the same standards as a maintainer revie
 - Preserve SwiftPM-compatible dependency resolution semantics. Resolver changes should match SwiftPM behavior unless the difference is explicitly intentional and tested.
 - Preserve SwifterPM storage behavior. Fetching, source checkout, registry fallback, artifact extraction, and materialization should keep using the Global CAS cache and avoid duplicating package contents unnecessarily.
 - Treat registry, GitHub, and GitLab resolution paths as user-visible behavior. Verify fallback logic, identity normalization, version constraints, and source URL handling carefully.
-- Prefer SwiftNIO filesystem primitives through `AsyncFileSystem` and `NIOFileSystem`. Flag new production use of `Foundation.FileManager`.
+- Prefer the shared `fileSystem` instance from `tuist/FileSystem` for filesystem operations. Convert URLs to `AbsolutePath` via the in-module `URL.absolutePath` helper. Flag new production use of `Foundation.FileManager`, custom filesystem wrappers (e.g. `AsyncFileSystem`), or calls to SwiftNIO/`swift-tools-support-core` filesystem primitives when `tuist/FileSystem` already provides equivalent functionality.
 - Check concurrency around cache writes, artifact extraction, and shared resolver state. Look for races, non-atomic writes, and partial materialization after failures.
 - Check that temporary directories, copied e2e scenarios, and test fixtures are cleaned up.
 - For e2e tests, scenarios should live under fixture folders and be copied into temporary folders before execution.
